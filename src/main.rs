@@ -6,12 +6,8 @@ mod ui;
 mod utils;
 
 use std::backtrace::Backtrace;
-use std::sync::OnceLock;
 
 use winit::event_loop::{ControlFlow, EventLoop};
-
-pub(crate) static EVENT_PROXY: OnceLock<winit::event_loop::EventLoopProxy<UserEvent>> =
-    OnceLock::new();
 
 #[cfg(not(target_os = "android"))]
 fn main() {
@@ -53,19 +49,14 @@ fn main() {
 
 enum UserEvent {
     TrayIconEvent(tray_icon::TrayIconEvent),
-    SaveRequest(Option<std::path::PathBuf>, Option<usize>),
-    LoadRequest(Option<std::path::PathBuf>),
-    ExportRequest(Option<std::path::PathBuf>),
 }
 
 #[cfg(not(target_os = "android"))]
 async fn run_desktop() {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build().unwrap();
     let proxy = event_loop.create_proxy();
-    EVENT_PROXY.set(proxy.clone()).ok();
-    let tray_proxy = proxy.clone();
     tray_icon::TrayIconEvent::set_event_handler(Some(move |event| {
-        let _ = tray_proxy.send_event(UserEvent::TrayIconEvent(event));
+        let _ = proxy.send_event(UserEvent::TrayIconEvent(event));
     }));
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = app::App::new();

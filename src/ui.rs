@@ -7,7 +7,7 @@ use winit::window::Window;
 use crate::{
     state::{
         AppState, CanvasImage, CanvasObject, CanvasObjectOps, CanvasShape, CanvasShapeType,
-        CanvasStroke, CanvasText, CanvasTool, DynamicBrushWidthMode, GraphicsApi,
+        CanvasState, CanvasStroke, CanvasText, CanvasTool, DynamicBrushWidthMode, GraphicsApi,
         OptimizationPolicy, PageState, PersistentState, StrokeWidth, ThemeMode, WindowMode,
     },
     utils::{
@@ -55,13 +55,32 @@ pub fn ui_welcome(state: &mut AppState, ctx: &Context) {
                 state.show_welcome_window = false;
             }
             if ui.button("加载画布").clicked() {
-                let proxy = crate::EVENT_PROXY.get().unwrap().clone();
-                std::thread::spawn(move || {
-                    let path = rfd::FileDialog::new()
+                let path = pollster::block_on(
+                    rfd::AsyncFileDialog::new()
                         .add_filter("画布文件", &["sb"])
-                        .pick_file();
-                    let _ = proxy.send_event(crate::UserEvent::LoadRequest(path));
-                });
+                        .pick_file(),
+                );
+                if let Some(file) = path {
+                    match CanvasState::load_from_file(&file.path().to_path_buf()) {
+                        Ok(canvas) => {
+                            let page = PageState {
+                                canvas,
+                                history: crate::state::History::default(),
+                            };
+                            let new_idx = state.pages.len();
+                            state.pages.push(page.clone());
+                            state.current_page = new_idx;
+                            state.canvas = page.canvas;
+                            state.history = page.history;
+                            clear_interaction_state(state);
+                            state.show_welcome_window = false;
+                            state.toasts.success("成功加载画布!");
+                        }
+                        Err(err) => {
+                            state.toasts.error(format!("画布加载失败: {}!", err));
+                        }
+                    }
+                }
             }
 
             ui.separator();
@@ -237,37 +256,65 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         ui.horizontal(|ui| {
             ui.label("画布持久化:");
             if ui.button("加载").clicked() {
-                let proxy = crate::EVENT_PROXY.get().unwrap().clone();
-                std::thread::spawn(move || {
-                    let path = rfd::FileDialog::new()
+                let path = pollster::block_on(
+                    rfd::AsyncFileDialog::new()
                         .add_filter("画布文件", &["sb"])
-                        .pick_file();
-                    let _ = proxy.send_event(crate::UserEvent::LoadRequest(path));
-                });
+                        .pick_file(),
+                );
+                if let Some(file) = path {
+                    match CanvasState::load_from_file(&file.path().to_path_buf()) {
+                        Ok(canvas) => {
+                            let page = PageState {
+                                canvas,
+                                history: crate::state::History::default(),
+                            };
+                            let new_idx = state.pages.len();
+                            state.pages.push(page.clone());
+                            state.current_page = new_idx;
+                            state.canvas = page.canvas;
+                            state.history = page.history;
+                            clear_interaction_state(state);
+                            state.show_welcome_window = false;
+                            state.toasts.success("成功加载画布!");
+                        }
+                        Err(err) => {
+                            state.toasts.error(format!("画布加载失败: {}!", err));
+                        }
+                    }
+                }
             }
             if ui.button("保存").clicked() {
-                let proxy = crate::EVENT_PROXY.get().unwrap().clone();
-                std::thread::spawn(move || {
-                    let path = rfd::FileDialog::new()
+                let file = pollster::block_on(
+                    rfd::AsyncFileDialog::new()
                         .add_filter("画布文件", &["sb"])
                         .set_file_name("canvas.sb")
-                        .save_file();
-                    let _ = proxy.send_event(crate::UserEvent::SaveRequest(path, None));
-                });
+                        .save_file(),
+                );
+                if let Some(file) = file {
+                    match state.canvas.save_to_file(&file.path().to_path_buf()) {
+                        Ok(_) => {
+                            state.toasts.success("成功保存画布!");
+                        }
+                        Err(err) => {
+                            state.toasts.error(format!("画布保存失败: {}!", err));
+                        }
+                    }
+                }
             }
         });
 
         ui.horizontal(|ui| {
             ui.label("画布转换:");
             if ui.button("导出为图片").clicked() {
-                let proxy = crate::EVENT_PROXY.get().unwrap().clone();
-                std::thread::spawn(move || {
-                    let path = rfd::FileDialog::new()
+                let path = pollster::block_on(
+                    rfd::AsyncFileDialog::new()
                         .add_filter("画布文件", IMAGE_FILE_EXTS)
                         .set_file_name("canvas.bmp")
-                        .save_file();
-                    let _ = proxy.send_event(crate::UserEvent::ExportRequest(path));
-                });
+                        .save_file(),
+                );
+                if let Some(file) = path {
+                    state.screenshot_path = Some(file.path().to_path_buf());
+                }
             }
         });
 
@@ -928,16 +975,28 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
                                         }
 
                                         if ui.button("✓ 保存").clicked() {
-                                            let proxy = crate::EVENT_PROXY.get().unwrap().clone();
-                                            std::thread::spawn(move || {
-                                                let path = rfd::FileDialog::new()
+                                            let file = pollster::block_on(
+                                                rfd::AsyncFileDialog::new()
                                                     .add_filter("画布文件", &["sb"])
                                                     .set_file_name("canvas.sb")
-                                                    .save_file();
-                                                let _ = proxy.send_event(
-                                                    crate::UserEvent::SaveRequest(path, Some(i)),
-                                                );
-                                            });
+                                                    .save_file(),
+                                            );
+                                            if let Some(file) = file {
+                                                match state.pages[i]
+                                                    .canvas
+                                                    .save_to_file(&file.path().to_path_buf())
+                                                {
+                                                    Ok(_) => {
+                                                        state.toasts.success("成功保存画布!");
+                                                    }
+                                                    Err(err) => {
+                                                        state.toasts.error(format!(
+                                                            "画布保存失败: {}!",
+                                                            err
+                                                        ));
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         if ui
@@ -1044,13 +1103,32 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
                     add_new_page_state(state);
                 }
                 if ui.button("O 加载").clicked() {
-                    let proxy = crate::EVENT_PROXY.get().unwrap().clone();
-                    std::thread::spawn(move || {
-                        let path = rfd::FileDialog::new()
+                    let path = pollster::block_on(
+                        rfd::AsyncFileDialog::new()
                             .add_filter("画布文件", &["sb"])
-                            .pick_file();
-                        let _ = proxy.send_event(crate::UserEvent::LoadRequest(path));
-                    });
+                            .pick_file(),
+                    );
+                    if let Some(file) = path {
+                        match CanvasState::load_from_file(&file.path().to_path_buf()) {
+                            Ok(canvas) => {
+                                let page = PageState {
+                                    canvas,
+                                    history: crate::state::History::default(),
+                                };
+                                let new_idx = state.pages.len();
+                                state.pages.push(page.clone());
+                                state.current_page = new_idx;
+                                state.canvas = page.canvas;
+                                state.history = page.history;
+                                clear_interaction_state(state);
+                                state.show_welcome_window = false;
+                                state.toasts.success("成功加载画布!");
+                            }
+                            Err(err) => {
+                                state.toasts.error(format!("画布加载失败: {}!", err));
+                            }
+                        }
+                    }
                 }
                 if ui.button("X 关闭").clicked() {
                     state.show_page_management_window = false;
