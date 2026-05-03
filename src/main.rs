@@ -6,25 +6,40 @@ mod ui;
 mod utils;
 
 use std::backtrace::Backtrace;
+use std::sync::OnceLock;
 
 use winit::event_loop::{ControlFlow, EventLoop};
+
+pub(crate) static EVENT_PROXY: OnceLock<winit::event_loop::EventLoopProxy<UserEvent>> =
+    OnceLock::new();
 
 #[cfg(not(target_os = "android"))]
 fn main() {
     #[cfg(target_os = "linux")]
     utils::linux::silence_glib_logs();
 
+    utils::logger::init();
+
     std::panic::set_hook(Box::new(|info| {
-        eprintln!("panic: {info}");
-        eprintln!("backtrace:\n{}", Backtrace::force_capture());
+        let bt = Backtrace::force_capture();
+        let msg = format!("panic: {info}\nbacktrace:\n{bt}");
+
+        log_error!("{}", msg);
+
+        let path = dirs::download_dir()
+            .unwrap_or_default()
+            .join("smartboard_backtrace.txt");
+        let _ = std::fs::write(&path, &msg);
 
         rfd::MessageDialog::new()
             .set_title("应用崩溃")
             .set_level(rfd::MessageLevel::Error)
-            .set_description(info.to_string())
+            .set_description(format!("{info}\n\n已保存到: {}", path.display()))
             .set_buttons(rfd::MessageButtons::Ok)
             .show();
     }));
+
+    log_info!("smartboard starting...");
 
     println!(
         r"
@@ -42,14 +57,19 @@ fn main() {
 
 enum UserEvent {
     TrayIconEvent(tray_icon::TrayIconEvent),
+    SaveRequest(Option<std::path::PathBuf>, Option<usize>),
+    LoadRequest(Option<std::path::PathBuf>),
+    ExportRequest(Option<std::path::PathBuf>),
 }
 
 #[cfg(not(target_os = "android"))]
 async fn run_desktop() {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build().unwrap();
     let proxy = event_loop.create_proxy();
+    EVENT_PROXY.set(proxy.clone()).ok();
+    let tray_proxy = proxy.clone();
     tray_icon::TrayIconEvent::set_event_handler(Some(move |event| {
-        let _ = proxy.send_event(UserEvent::TrayIconEvent(event));
+        let _ = tray_proxy.send_event(UserEvent::TrayIconEvent(event));
     }));
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = app::App::new();

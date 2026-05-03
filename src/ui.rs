@@ -15,8 +15,7 @@ use crate::{
         stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start},
         ui::{
             PageAction, add_new_page_state, apply_theme_mode_and_canvas_color, apply_window_mode,
-            clear_interaction_state, load_canvas_from_file, save_canvas_to_file,
-            switch_to_page_state,
+            clear_interaction_state, switch_to_page_state,
         },
     },
 };
@@ -56,7 +55,13 @@ pub fn ui_welcome(state: &mut AppState, ctx: &Context) {
                 state.show_welcome_window = false;
             }
             if ui.button("加载画布").clicked() {
-                load_canvas_from_file(state);
+                let proxy = crate::EVENT_PROXY.get().unwrap().clone();
+                std::thread::spawn(move || {
+                    let path = rfd::FileDialog::new()
+                        .add_filter("画布文件", &["sb"])
+                        .pick_file();
+                    let _ = proxy.send_event(crate::UserEvent::LoadRequest(path));
+                });
             }
 
             ui.separator();
@@ -232,23 +237,37 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         ui.horizontal(|ui| {
             ui.label("画布持久化:");
             if ui.button("加载").clicked() {
-                load_canvas_from_file(state);
+                let proxy = crate::EVENT_PROXY.get().unwrap().clone();
+                std::thread::spawn(move || {
+                    let path = rfd::FileDialog::new()
+                        .add_filter("画布文件", &["sb"])
+                        .pick_file();
+                    let _ = proxy.send_event(crate::UserEvent::LoadRequest(path));
+                });
             }
             if ui.button("保存").clicked() {
-                save_canvas_to_file(&mut state.toasts, &state.canvas);
+                let proxy = crate::EVENT_PROXY.get().unwrap().clone();
+                std::thread::spawn(move || {
+                    let path = rfd::FileDialog::new()
+                        .add_filter("画布文件", &["sb"])
+                        .set_file_name("canvas.sb")
+                        .save_file();
+                    let _ = proxy.send_event(crate::UserEvent::SaveRequest(path, None));
+                });
             }
         });
 
         ui.horizontal(|ui| {
             ui.label("画布转换:");
             if ui.button("导出为图片").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("画布文件", IMAGE_FILE_EXTS)
-                    .set_file_name("canvas.bmp")
-                    .save_file()
-                {
-                    state.screenshot_path = Some(path);
-                }
+                let proxy = crate::EVENT_PROXY.get().unwrap().clone();
+                std::thread::spawn(move || {
+                    let path = rfd::FileDialog::new()
+                        .add_filter("画布文件", IMAGE_FILE_EXTS)
+                        .set_file_name("canvas.bmp")
+                        .save_file();
+                    let _ = proxy.send_event(crate::UserEvent::ExportRequest(path));
+                });
             }
         });
 
@@ -909,10 +928,16 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
                                         }
 
                                         if ui.button("✓ 保存").clicked() {
-                                            save_canvas_to_file(
-                                                &mut state.toasts,
-                                                &state.pages[i].canvas,
-                                            );
+                                            let proxy = crate::EVENT_PROXY.get().unwrap().clone();
+                                            std::thread::spawn(move || {
+                                                let path = rfd::FileDialog::new()
+                                                    .add_filter("画布文件", &["sb"])
+                                                    .set_file_name("canvas.sb")
+                                                    .save_file();
+                                                let _ = proxy.send_event(
+                                                    crate::UserEvent::SaveRequest(path, Some(i)),
+                                                );
+                                            });
                                         }
 
                                         if ui
@@ -1019,7 +1044,13 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
                     add_new_page_state(state);
                 }
                 if ui.button("O 加载").clicked() {
-                    load_canvas_from_file(state);
+                    let proxy = crate::EVENT_PROXY.get().unwrap().clone();
+                    std::thread::spawn(move || {
+                        let path = rfd::FileDialog::new()
+                            .add_filter("画布文件", &["sb"])
+                            .pick_file();
+                        let _ = proxy.send_event(crate::UserEvent::LoadRequest(path));
+                    });
                 }
                 if ui.button("X 关闭").clicked() {
                     state.show_page_management_window = false;

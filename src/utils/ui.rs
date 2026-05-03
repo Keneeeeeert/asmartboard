@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use egui::{Color32, Context, Visuals};
-use egui_notify::Toasts;
 use winit::window::{Fullscreen, Window};
 
-use crate::state::{AppState, CanvasState, History, PageState, ThemeMode, WindowMode};
+use crate::state::{AppState, PageState, ThemeMode, WindowMode};
 
 pub fn apply_theme_mode_and_canvas_color(
     ctx: &Context,
@@ -107,37 +106,4 @@ pub fn add_new_page_state(state: &mut AppState) {
     let new_idx = state.pages.len() - 1;
     state.current_page = new_idx;
     clear_interaction_state(state);
-}
-
-pub fn load_canvas_from_file(state: &mut AppState) {
-    match CanvasState::load_from_file_with_dialog() {
-        Ok(canvas) => {
-            let page = PageState {
-                canvas,
-                history: History::default(),
-            };
-            let new_idx = state.pages.len();
-            state.pages.push(page.clone());
-            state.current_page = new_idx;
-            state.canvas = page.canvas;
-            state.history = page.history;
-            clear_interaction_state(state);
-            state.show_welcome_window = false;
-            state.toasts.success("成功加载画布!");
-        }
-        Err(err) => {
-            state.toasts.error(format!("画布加载失败: {}!", err));
-        }
-    };
-}
-
-pub fn save_canvas_to_file(toasts: &mut Toasts, canvas: &CanvasState) {
-    match canvas.save_to_file_with_dialog() {
-        Ok(_) => {
-            toasts.success("成功保存画布!");
-        }
-        Err(err) => {
-            toasts.error(format!("画布保存失败: {}!", err));
-        }
-    }
 }

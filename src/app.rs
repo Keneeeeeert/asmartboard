@@ -2,7 +2,7 @@ use crate::assets::ICON;
 use crate::render::RenderState;
 #[cfg(feature = "startup_animation")]
 use crate::state::StartupAnimation;
-use crate::state::{AppState, CanvasObject, CanvasTool};
+use crate::state::{AppState, CanvasObject, CanvasState, CanvasTool, PageState};
 use crate::utils::stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start};
 use crate::utils::ui::{apply_theme_mode_and_canvas_color, apply_window_mode};
 use crate::{UserEvent, ui};
@@ -401,9 +401,58 @@ impl ApplicationHandler<UserEvent> for App {
                     if let Some(tray) = &self.state.tray {
                         let _ = tray.set_visible(false);
                     }
-                    // redraw on tray click
                     window.request_redraw();
                 }
+            }
+            UserEvent::SaveRequest(Some(path), page_idx) => {
+                let canvas = match page_idx {
+                    Some(i) => &self.state.pages[i].canvas,
+                    None => &self.state.canvas,
+                };
+                match canvas.save_to_file(&path) {
+                    Ok(_) => {
+                        self.state.toasts.success("成功保存画布!");
+                    }
+                    Err(err) => {
+                        self.state.toasts.error(format!("画布保存失败: {}!", err));
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UserEvent::SaveRequest(None, _) => {
+                // user cancelled dialog, do nothing
+            }
+            UserEvent::LoadRequest(Some(path)) => {
+                match CanvasState::load_from_file(&path) {
+                    Ok(canvas) => {
+                        let page = PageState {
+                            canvas,
+                            history: crate::state::History::default(),
+                        };
+                        let new_idx = self.state.pages.len();
+                        self.state.pages.push(page.clone());
+                        self.state.current_page = new_idx;
+                        self.state.canvas = page.canvas;
+                        self.state.history = page.history;
+                        crate::utils::ui::clear_interaction_state(&mut self.state);
+                        self.state.show_welcome_window = false;
+                        self.state.toasts.success("成功加载画布!");
+                    }
+                    Err(err) => {
+                        self.state.toasts.error(format!("画布加载失败: {}!", err));
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UserEvent::LoadRequest(None) => {
+                // user cancelled dialog, do nothing
+            }
+            UserEvent::ExportRequest(Some(path)) => {
+                self.state.screenshot_path = Some(path);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UserEvent::ExportRequest(None) => {
+                // user cancelled dialog, do nothing
             }
         }
     }
