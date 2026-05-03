@@ -1,4 +1,4 @@
-# erh_smartboard
+# erh_smartboard — ERH Remembers Handwriting
 
 a high-performance whiteboard app written in rust, forked from [smartboard](https://github.com/Ujhhgtg/smartboard).
 

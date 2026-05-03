@@ -1,4 +1,4 @@
-# AGENTS.md — erh_smartboard
+# AGENTS.md — erh_smartboard (ERH Remembers Handwriting)
 
 A performant digital whiteboard app.
 
