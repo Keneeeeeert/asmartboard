@@ -1,4 +1,5 @@
 pub mod dark_mode;
+pub mod logger;
 pub mod stroke;
 pub mod ui;
 
@@ -707,3 +708,40 @@ pub fn font_bytes() -> &'static [u8] {
 
 #[cfg(all(feature = "embedded_font", feature = "system_font"))]
 compile_error!("Features 'embedded_font' and 'system_fonts' cannot be enabled together");
+
+// --- logging macros ---
+
+#[macro_export]
+macro_rules! log_error {
+    ($($arg:tt)*) => {
+        $crate::utils::logger::write_log("ERROR", &format!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! log_warn {
+    ($($arg:tt)*) => {
+        $crate::utils::logger::write_log("WARN ", &format!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! log_info {
+    ($($arg:tt)*) => {
+        $crate::utils::logger::write_log("INFO ", &format!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! log_debug {
+    ($($arg:tt)*) => {
+        $crate::utils::logger::write_log("DEBUG", &format!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! log_trace {
+    ($($arg:tt)*) => {
+        $crate::utils::logger::write_log("TRACE", &format!($($arg)*))
+    };
+}
