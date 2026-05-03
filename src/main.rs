@@ -18,13 +18,11 @@ fn main() {
     #[cfg(target_os = "linux")]
     utils::linux::silence_glib_logs();
 
-    utils::logger::init();
-
     std::panic::set_hook(Box::new(|info| {
         let bt = Backtrace::force_capture();
         let msg = format!("panic: {info}\nbacktrace:\n{bt}");
 
-        log_error!("{}", msg);
+        eprintln!("{msg}");
 
         let path = dirs::download_dir()
             .unwrap_or_default()
@@ -38,8 +36,6 @@ fn main() {
             .set_buttons(rfd::MessageButtons::Ok)
             .show();
     }));
-
-    log_info!("smartboard starting...");
 
     println!(
         r"
