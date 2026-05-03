@@ -1700,10 +1700,6 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
             }
         }
 
-        if state.touch_used {
-            return;
-        }
-
         // 处理鼠标输入
         let pointer_pos = response.interact_pointer_pos();
 
@@ -1980,6 +1976,10 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
             }
 
             CanvasTool::Brush => {
+                if state.using_touch {
+                    return;
+                }
+
                 // 画笔工具
                 if response.drag_started() {
                     if let Some(pos) = pointer_pos
