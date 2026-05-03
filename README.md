@@ -6,6 +6,7 @@ a high-performance whiteboard app written in rust, forked from [smartboard](http
 
 - [Ujhhgtg](https://github.com/Ujhhgtg) — original project
 - [Keneeeeeert](https://github.com/Keneeeeeert) — fork maintainer, file dialog fix & features
+- DeepSeek — AI-assisted development
 
 ## building
 
