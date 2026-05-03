@@ -32,6 +32,7 @@ pub struct App {
     render_state: Option<RenderState>,
     window: Option<Arc<Window>>,
     state: AppState,
+    modifiers: winit::keyboard::ModifiersState,
 }
 
 impl App {
@@ -63,6 +64,7 @@ impl App {
             render_state: None,
             window: None,
             state,
+            modifiers: winit::keyboard::ModifiersState::default(),
         }
     }
 
@@ -501,16 +503,79 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::CloseRequested => {
                 self.exit(event_loop);
             }
+            WindowEvent::ModifiersChanged(mods) => {
+                self.modifiers = mods.state();
+            }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
-                        logical_key: Key::Named(NamedKey::Escape),
+                        logical_key,
                         state: winit::event::ElementState::Pressed,
                         ..
                     },
                 ..
             } => {
-                self.exit(event_loop);
+                let ctx = self.render_state.as_ref().unwrap().egui_renderer.context();
+                if ctx.egui_wants_keyboard_input() {
+                    // egui is handling input (e.g. text field), skip shortcuts
+                } else {
+                    match logical_key {
+                        Key::Named(NamedKey::Escape) => self.exit(event_loop),
+                        Key::Named(NamedKey::Delete) => {
+                            if let Some(idx) = self.state.selected_object_index {
+                                if idx < self.state.canvas.objects.len() {
+                                    let obj = self.state.canvas.objects.remove(idx);
+                                    self.state.history.save_remove_object(idx, obj);
+                                    self.state.selected_object_index = None;
+                                    self.window.as_ref().unwrap().request_redraw();
+                                }
+                            }
+                        }
+                        Key::Character(ref ch) => {
+                            let ctrl = self.modifiers.control_key();
+                            match ch.as_str() {
+                                "z" if ctrl => {
+                                    self.state.selected_object_index = None;
+                                    self.state.history.undo(&mut self.state.canvas);
+                                    self.window.as_ref().unwrap().request_redraw();
+                                }
+                                "y" if ctrl => {
+                                    self.state.selected_object_index = None;
+                                    self.state.history.redo(&mut self.state.canvas);
+                                    self.window.as_ref().unwrap().request_redraw();
+                                }
+                                "s" if ctrl => {
+                                    let proxy = crate::EVENT_PROXY.get().unwrap().clone();
+                                    std::thread::spawn(move || {
+                                        let path = rfd::FileDialog::new()
+                                            .add_filter("画布文件", &["sb"])
+                                            .set_file_name("canvas.sb")
+                                            .save_file();
+                                        let _ = proxy.send_event(UserEvent::FileDialogResult {
+                                            path,
+                                            action: FileDialogAction::Save,
+                                            page_index: None,
+                                        });
+                                    });
+                                }
+                                "b" if !ctrl => {
+                                    self.state.current_tool = CanvasTool::Brush;
+                                    self.window.as_ref().unwrap().request_redraw();
+                                }
+                                "v" if !ctrl => {
+                                    self.state.current_tool = CanvasTool::Select;
+                                    self.window.as_ref().unwrap().request_redraw();
+                                }
+                                "e" if !ctrl => {
+                                    self.state.current_tool = CanvasTool::ObjectEraser;
+                                    self.window.as_ref().unwrap().request_redraw();
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
             WindowEvent::RedrawRequested => {
                 self.handle_redraw();
