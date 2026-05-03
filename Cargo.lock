@@ -737,6 +737,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "erh_smartboard"
+version = "0.1.1"
+dependencies = [
+ "dirs",
+ "egui",
+ "egui-notify",
+ "egui-wgpu",
+ "egui-winit",
+ "fontdb",
+ "glib 0.22.7",
+ "image",
+ "pollster",
+ "rfd",
+ "rkyv",
+ "rodio",
+ "serde",
+ "serde_json",
+ "shellexpand",
+ "tray-icon",
+ "ttf-parser",
+ "wgpu",
+ "windows",
+ "windows-core",
+ "winit",
+ "winreg",
+ "winres",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2948,35 +2977,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "smartboard"
-version = "0.1.1"
-dependencies = [
- "dirs",
- "egui",
- "egui-notify",
- "egui-wgpu",
- "egui-winit",
- "fontdb",
- "glib 0.22.7",
- "image",
- "pollster",
- "rfd",
- "rkyv",
- "rodio",
- "serde",
- "serde_json",
- "shellexpand",
- "tray-icon",
- "ttf-parser",
- "wgpu",
- "windows",
- "windows-core",
- "winit",
- "winreg",
- "winres",
 ]
 
 [[package]]

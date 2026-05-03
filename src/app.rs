@@ -20,6 +20,13 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
+#[derive(Clone, Copy)]
+pub enum FileDialogAction {
+    Save,
+    Load,
+    Export,
+}
+
 pub struct App {
     gpu_instance: wgpu::Instance,
     render_state: Option<RenderState>,
@@ -68,7 +75,7 @@ impl App {
         let (width, height) = icon.dimensions();
 
         // 设置标题
-        window.set_title("smartboard");
+        window.set_title("erh_smartboard");
         let winit_icon = Some(
             winit::window::Icon::from_rgba(rgba.clone(), width, height).expect("invalid icon data"),
         );
@@ -100,7 +107,7 @@ error: failed to get monitor
         // 创建托盘图标
         let tray = TrayIconBuilder::new()
             .with_icon(tray_icon::Icon::from_rgba(rgba, width, height).expect("invalid icon data"))
-            .with_tooltip("smartboard")
+            .with_tooltip("erh_smartboard")
             .build()
             .unwrap();
         let _ = tray.set_visible(false);
@@ -403,6 +410,63 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     window.request_redraw();
                 }
+            }
+            UserEvent::FileDialogResult {
+                path: Some(path),
+                action: FileDialogAction::Save,
+                page_index,
+            } => {
+                let canvas = match page_index {
+                    Some(i) => &self.state.pages[i].canvas,
+                    None => &self.state.canvas,
+                };
+                match canvas.save_to_file(&path) {
+                    Ok(_) => {
+                        self.state.toasts.success("已保存");
+                    }
+                    Err(e) => {
+                        self.state.toasts.error(format!("保存失败: {e}"));
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UserEvent::FileDialogResult {
+                path: Some(path),
+                action: FileDialogAction::Load,
+                ..
+            } => {
+                let canvas = crate::state::CanvasState::load_from_file(&path);
+                match canvas {
+                    Ok(canvas) => {
+                        let page = crate::state::PageState {
+                            canvas,
+                            history: crate::state::History::default(),
+                        };
+                        let idx = self.state.pages.len();
+                        self.state.pages.push(page.clone());
+                        self.state.current_page = idx;
+                        self.state.canvas = page.canvas;
+                        self.state.history = page.history;
+                        crate::utils::ui::clear_interaction_state(&mut self.state);
+                        self.state.show_welcome_window = false;
+                        self.state.toasts.success("已加载");
+                    }
+                    Err(e) => {
+                        self.state.toasts.error(format!("加载失败: {e}"));
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UserEvent::FileDialogResult {
+                path: Some(path),
+                action: FileDialogAction::Export,
+                ..
+            } => {
+                self.state.screenshot_path = Some(path);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UserEvent::FileDialogResult { .. } => {
+                // user cancelled
             }
         }
     }

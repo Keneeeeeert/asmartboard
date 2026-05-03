@@ -1,5 +1,5 @@
 [package]
-name = "smartboard"
+name = "erh_smartboard"
 description = "A powerful digital whiteboard built with Rust, winit, egui, and wgpu."
 version = "0.1.1"
 authors = ["Fey Xie <feyxiexzf@gmail.com>"]

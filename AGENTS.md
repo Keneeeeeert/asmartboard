@@ -1,4 +1,4 @@
-# AGENTS.md — smartboard
+# AGENTS.md — erh_smartboard
 
 A performant digital whiteboard app.
 

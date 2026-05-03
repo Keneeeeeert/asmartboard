@@ -1,8 +1,11 @@
-# smartboard
+# erh_smartboard
 
-a high-performance whiteboard app written in rust
+a high-performance whiteboard app written in rust, forked from [smartboard](https://github.com/Ujhhgtg/smartboard).
 
-reinventing the wheel because ~~others suck~~ why not
+## contributors
+
+- [Ujhhgtg](https://github.com/Ujhhgtg) — original project
+- [Keneeeeeert](https://github.com/Keneeeeeert) — fork maintainer, file dialog fix & features
 
 ## building
 

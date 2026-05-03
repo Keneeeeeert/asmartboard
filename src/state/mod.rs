@@ -812,7 +812,7 @@ impl PersistentState {
     // 获取设置文件路径
     fn get_settings_path() -> std::path::PathBuf {
         let mut path = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        path.push("smartboard");
+        path.push("erh_smartboard");
         std::fs::create_dir_all(&path).ok();
         path.push("settings.json");
         path
