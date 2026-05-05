@@ -22,6 +22,7 @@ pub fn brush_stroke_start(state: &mut AppState, pointer_id: u64, pos: Pos2) {
         PointerState {
             id: pointer_id,
             pos,
+            prev_pos: None,
             interaction: PointerInteraction::Drawing {
                 active_stroke: ActiveStroke {
                     points: vec![pos],

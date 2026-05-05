@@ -1180,6 +1180,7 @@ pub enum PointerInteraction {
 pub struct PointerState {
     pub id: u64,
     pub pos: Pos2,
+    pub prev_pos: Option<Pos2>,
     pub interaction: PointerInteraction,
 }
 
@@ -1546,6 +1547,7 @@ pub struct AppState {
     pub dynamic_brush_width_mode: DynamicBrushWidthMode, // 动态画笔大小微调
     pub current_tool: CanvasTool,             // 当前工具
     pub eraser_size: f32,                     // 橡皮擦大小
+    pub eraser_prev_mouse_pos: Option<Pos2>,  // 上一帧鼠标橡皮擦位置（用于插值）
     pub selected_object_index: Option<usize>, // 选中的对象索引（全局共享）
 
     // persistent states
@@ -1600,6 +1602,7 @@ impl Default for AppState {
             dynamic_brush_width_mode: DynamicBrushWidthMode::default(),
             current_tool: CanvasTool::Brush,
             eraser_size: 10.0,
+            eraser_prev_mouse_pos: None,
             selected_object_index: None,
             show_size_preview: false,
             fps_counter: FpsCounter::new(),

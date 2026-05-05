@@ -1818,6 +1818,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                 PointerState {
                                     id: 0,
                                     pos,
+                                    prev_pos: None,
                                     interaction: PointerInteraction::Selecting {
                                         drag_start: pos,
                                         dragged_handle,
@@ -1964,21 +1965,57 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 
             CanvasTool::PixelEraser => {
                 let eraser_positions: Vec<Pos2> = if has_touch {
-                    state
-                        .pointers
-                        .values()
-                        .filter(|p| matches!(p.interaction, PointerInteraction::Erasing))
-                        .map(|p| p.pos)
-                        .collect()
-                } else if response.dragged() || response.clicked() {
-                    pointer_pos.into_iter().collect()
+                    let mut positions = Vec::new();
+                    for pointer in state.pointers.values() {
+                        if !matches!(pointer.interaction, PointerInteraction::Erasing) {
+                            continue;
+                        }
+                        if let Some(prev) = pointer.prev_pos {
+                            let dist = prev.distance(pointer.pos);
+                            let step = state.eraser_size * 0.5;
+                            if dist > step {
+                                let num_steps = (dist / step).ceil() as usize;
+                                for j in 1..num_steps {
+                                    let t = j as f32 / num_steps as f32;
+                                    positions.push(prev.lerp(pointer.pos, t));
+                                }
+                            }
+                        }
+                        positions.push(pointer.pos);
+                    }
+                    positions
                 } else {
-                    vec![]
+                    let mut positions = Vec::new();
+                    if response.dragged() || response.clicked() {
+                        if let Some(current_pos) = pointer_pos {
+                            if let Some(prev_pos) = state.eraser_prev_mouse_pos {
+                                let dist = prev_pos.distance(current_pos);
+                                let step = state.eraser_size * 0.5;
+                                if dist > step {
+                                    let num_steps = (dist / step).ceil() as usize;
+                                    for j in 1..num_steps {
+                                        let t = j as f32 / num_steps as f32;
+                                        positions.push(prev_pos.lerp(current_pos, t));
+                                    }
+                                }
+                            }
+                            positions.push(current_pos);
+                        }
+                    }
+                    positions
                 };
 
-                for pos in eraser_positions {
+                if has_touch {
+                    for pointer in state.pointers.values() {
+                        if matches!(pointer.interaction, PointerInteraction::Erasing) {
+                            utils::draw_size_preview(painter, pointer.pos, state.eraser_size);
+                        }
+                    }
+                } else if let Some(pos) = pointer_pos {
                     utils::draw_size_preview(painter, pos, state.eraser_size);
+                }
 
+                for pos in eraser_positions {
                     let eraser_radius = state.eraser_size / 2.0;
                     let eraser_rect = egui::Rect::from_center_size(
                         pos,
@@ -2033,8 +2070,8 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                             rot: 0.0,
                                         });
                                     }
-                                    current_points = Vec::new();
-                                    current_widths = Vec::new();
+                                    current_points = vec![p2];
+                                    current_widths = vec![stroke.width.get(i + 1)];
                                 }
                             }
 
@@ -2080,6 +2117,18 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                             state.canvas.objects.push(CanvasObject::Stroke(stroke));
                         }
                     }
+                }
+
+                if has_touch {
+                    for pointer in state.pointers.values_mut() {
+                        if matches!(pointer.interaction, PointerInteraction::Erasing) {
+                            pointer.prev_pos = Some(pointer.pos);
+                        }
+                    }
+                } else if response.drag_stopped() || (!response.dragged() && !response.clicked()) {
+                    state.eraser_prev_mouse_pos = None;
+                } else {
+                    state.eraser_prev_mouse_pos = pointer_pos;
                 }
             }
 

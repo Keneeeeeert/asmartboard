@@ -560,6 +560,7 @@ impl ApplicationHandler<()> for App {
                                 PointerState {
                                     id,
                                     pos,
+                                    prev_pos: None,
                                     interaction: PointerInteraction::Selecting {
                                         drag_start: pos,
                                         dragged_handle,
@@ -575,6 +576,7 @@ impl ApplicationHandler<()> for App {
                                 PointerState {
                                     id,
                                     pos,
+                                    prev_pos: None,
                                     interaction: PointerInteraction::Erasing,
                                 },
                             );
