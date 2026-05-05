@@ -1,5 +1,6 @@
 mod app;
 mod assets;
+mod passthrough_helper;
 mod render;
 mod state;
 mod ui;

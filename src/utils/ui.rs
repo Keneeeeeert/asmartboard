@@ -12,7 +12,6 @@ use crate::{
         AppState, CanvasObject, CanvasShape, CanvasShapeType, CanvasState, CanvasStroke,
         CanvasTool, PageState, StrokeWidth, ThemeMode, WindowMode,
     },
-    utils,
 };
 
 pub fn apply_theme_mode_and_canvas_color(
@@ -163,15 +162,6 @@ pub fn setup_fonts(ctx: &mut Context) {
         .push(font_name.to_owned());
 
     ctx.set_fonts(fonts);
-}
-
-pub fn cursor_pos_phys_to_logic(ctx: &Context, pos: utils::cursor_pos::Point) -> Pos2 {
-    let pixels_per_point = ctx.pixels_per_point();
-
-    egui::pos2(
-        pos.x as f32 / pixels_per_point,
-        pos.y as f32 / pixels_per_point,
-    )
 }
 
 pub trait UiExtras {

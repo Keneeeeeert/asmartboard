@@ -723,7 +723,6 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
                 state.overlay_mode_changed = true;
                 if state.is_overlay_mode {
                     window.set_window_level(WindowLevel::AlwaysOnTop);
-                    state.current_tool = CanvasTool::Passthrough;
                 } else {
                     window.set_window_level(WindowLevel::Normal);
                     state.current_tool = CanvasTool::Brush;
@@ -808,10 +807,6 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
 }
 
 pub fn ui_pages_nav(state: &mut AppState, ctx: &Context) -> Option<(Rect, Rect)> {
-    if state.screenshot_path.is_some() {
-        return None;
-    }
-
     let content_rect = ctx.content_rect();
     let margin = 8.0;
     let total_pages = state.pages.len();
@@ -1122,10 +1117,6 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
 }
 
 pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> Option<Rect> {
-    if state.screenshot_path.is_some() {
-        return None;
-    }
-
     let content_rect = ctx.content_rect();
     let resp = egui::Window::new("工具栏")
         .resizable(false)
@@ -2297,3 +2288,27 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 }
 
 const IMAGE_FILE_EXTS: &[&str; 6] = &["png", "jpg", "jpeg", "bmp", "webp", "ico"];
+
+/// Renders the passthrough helper window UI with a return button.
+/// Returns `true` when the button is clicked, signaling that the helper
+/// should be closed and the tool should switch back to Brush.
+pub fn ui_passthrough_helper(ctx: &Context) -> bool {
+    let mut clicked = false;
+    let id = Id::new((ctx.viewport_id(), "passthrough_helper_panel"));
+    let mut panel_ui = Ui::new(
+        ctx.clone(),
+        id,
+        UiBuilder::new().max_rect(ctx.content_rect()),
+    );
+    panel_ui.set_clip_rect(ctx.content_rect());
+    CentralPanel::default().show_inside(&mut panel_ui, |ui| {
+        let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::click());
+        if ui
+            .put(rect, Button::new(RichText::new("继续绘制").size(14.0)))
+            .clicked()
+        {
+            clicked = true;
+        }
+    });
+    clicked
+}

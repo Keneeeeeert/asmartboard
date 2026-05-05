@@ -1,4 +1,3 @@
-pub mod cursor_pos;
 pub mod dark_mode;
 pub mod stroke;
 pub mod ui;
@@ -497,7 +496,6 @@ pub fn draw_resize_handles(painter: &egui::Painter, bbox: Rect) {
         painter.rect_filled(handle_rect, 0.0, handle_fill);
         painter.rect_stroke(handle_rect, 0.0, handle_stroke, egui::StrokeKind::Outside);
     }
-
 }
 
 // 获取鼠标位置下的调整句柄

@@ -1,4 +1,5 @@
 use crate::assets::ICON;
+use crate::passthrough_helper::PassthroughHelper;
 use crate::render::RenderState;
 #[cfg(feature = "startup_animation")]
 use crate::state::StartupAnimation;
@@ -7,9 +8,9 @@ use crate::state::{
     PointerState,
 };
 use crate::ui;
+use crate::utils;
 use crate::utils::stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start};
 use crate::utils::ui::{apply_theme_mode_and_canvas_color, apply_window_mode};
-use crate::utils::{self, cursor_pos};
 use core::f32;
 use egui::{Pos2, Vec2};
 use egui_wgpu::{ScreenDescriptor, wgpu};
@@ -21,17 +22,17 @@ use wgpu::{
 };
 use wgpu::{InstanceFlags, TexelCopyTextureInfo};
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalPosition;
 use winit::event::{KeyEvent, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 pub struct App {
-    gpu_instance: wgpu::Instance,
-    render_state: Option<RenderState>,
-    window: Option<Arc<Window>>,
-    state: AppState,
+    pub gpu_instance: wgpu::Instance,
+    pub render_state: Option<RenderState>,
+    pub window: Option<Arc<Window>>,
+    pub state: AppState,
+    pub helper_window: Option<PassthroughHelper>,
 }
 
 impl App {
@@ -67,6 +68,7 @@ impl App {
             render_state: None,
             window: None,
             state,
+            helper_window: None,
         }
     }
 
@@ -226,7 +228,7 @@ error: failed to enable premultiplied alpha for window: {:?}
         let ctx = &(render_state.egui_renderer.context().clone());
 
         // --- ui ---
-        let toolbar_rect = {
+        {
             #[cfg(feature = "profiling")]
             profiling::scope!("handle_redraw::ui");
 
@@ -244,21 +246,23 @@ error: failed to enable premultiplied alpha for window: {:?}
             #[cfg(feature = "profiling")]
             puffin_egui::profiler_window(ctx);
 
-            if self.state.show_welcome_window {
-                ui::ui_welcome(&mut self.state, ctx);
-            }
+            if self.state.current_tool != CanvasTool::Passthrough
+                && self.state.screenshot_path.is_none()
+            {
+                if self.state.show_welcome_window {
+                    ui::ui_welcome(&mut self.state, ctx);
+                }
 
-            let toolbar_rect = ui::ui_toolbar(&mut self.state, ctx, window);
+                ui::ui_toolbar(&mut self.state, ctx, window);
 
-            ui::ui_pages_nav(&mut self.state, ctx);
+                ui::ui_pages_nav(&mut self.state, ctx);
 
-            if self.state.show_page_management_window {
-                ui::ui_pages_manager(&mut self.state, ctx);
+                if self.state.show_page_management_window {
+                    ui::ui_pages_manager(&mut self.state, ctx);
+                }
             }
 
             ui::ui_canvas(&mut self.state, ctx);
-
-            toolbar_rect
         };
         // --- end ui
 
@@ -393,7 +397,7 @@ error: failed to enable premultiplied alpha for window: {:?}
 
         surface_texture.present();
 
-        // update window passthrough state only once if disabled
+        // update window passthrough state once if disabled
         if self.state.overlay_mode_changed && !self.state.is_overlay_mode {
             let _ = window.set_cursor_hittest(true);
             self.state.overlay_mode_changed = false;
@@ -402,29 +406,7 @@ error: failed to enable premultiplied alpha for window: {:?}
         // update window passthrough state every frame if enabled
         if self.state.is_overlay_mode {
             if self.state.current_tool == CanvasTool::Passthrough {
-                match cursor_pos::current() {
-                    Ok(pos) => {
-                        let cursor_pos = utils::ui::cursor_pos_phys_to_logic(ctx, pos);
-                        let _ = if let Some(mut rect) = toolbar_rect
-                            && {
-                                let win_pos = window
-                                    .inner_position()
-                                    .unwrap_or_else(|_| PhysicalPosition::<i32>::new(0, 0));
-                                let x = win_pos.x as f32;
-                                let y = win_pos.y as f32;
-                                rect.set_left(rect.left() + x);
-                                rect.set_top(rect.top() + y);
-                                rect.set_right(rect.right() + x);
-                                rect.set_bottom(rect.bottom() + y);
-                                rect.contains(cursor_pos)
-                            } {
-                            window.set_cursor_hittest(true)
-                        } else {
-                            window.set_cursor_hittest(false)
-                        };
-                    }
-                    Err(err) => eprintln!("failed to get cursor pos: {}", err),
-                }
+                let _ = window.set_cursor_hittest(false);
             } else {
                 let _ = window.set_cursor_hittest(true);
             }
@@ -456,6 +438,8 @@ impl ApplicationHandler<()> for App {
             return;
         }
 
+        self.request_helper_repaint_if_needed();
+
         if let Some(render_state) = self.render_state.as_ref() {
             if render_state.egui_renderer.context().has_requested_repaint() {
                 self.window.as_ref().unwrap().request_redraw();
@@ -463,7 +447,18 @@ impl ApplicationHandler<()> for App {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        // Dispatch to helper window if this event is for it
+        if self.is_event_for_helper(window_id) {
+            self.handle_helper_window_event(event_loop, event);
+            return;
+        }
+
         if self.state.should_quit {
             println!("quit button was pressed; exiting");
             self.exit(event_loop);
@@ -474,7 +469,6 @@ impl ApplicationHandler<()> for App {
         // don't pass RedrawRequested to egui's input handler,
         // it's not input and would make egui request a repaint, causing an infinite redraw loop
         if self.state.persistent.force_redraw_every_frame
-            || self.state.is_overlay_mode // we also need to redraw every frame since we cannot receive any event if passthrough is enabled
             || !matches!(event, WindowEvent::RedrawRequested)
         {
             let egui_needs_repaint = self
@@ -506,6 +500,7 @@ impl ApplicationHandler<()> for App {
             }
             WindowEvent::RedrawRequested => {
                 self.handle_redraw();
+                self.manage_passthrough_helper(event_loop);
             }
             WindowEvent::Resized(new_size) if new_size.width > 0 && new_size.height > 0 => {
                 self.handle_resized(new_size.width, new_size.height);
