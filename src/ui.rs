@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use egui::{Button, Color32, Context, Pos2, Rect, Stroke, Ui};
+use egui::{Align, Button, Color32, Context, Layout, Pos2, Rect, RichText, Stroke, Ui, UiBuilder};
 use wgpu::{Backend, PresentMode};
 use winit::window::{Window, WindowLevel};
 
@@ -16,8 +16,8 @@ use crate::{
         self,
         stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start},
         ui::{
-            PageAction, add_new_page_state, apply_theme_mode_and_canvas_color, apply_window_mode,
-            clear_interaction_state, load_canvas_from_file, save_canvas_to_file,
+            PageAction, UiExtras, add_new_page_state, apply_theme_mode_and_canvas_color,
+            apply_window_mode, clear_interaction_state, load_canvas_from_file, save_canvas_to_file,
             switch_to_page_state,
         },
     },
@@ -38,14 +38,14 @@ pub fn ui_welcome(state: &mut AppState, ctx: &Context) {
             ui.heading("欢迎使用 uwu");
             ui.separator();
 
-            ui.label("这是一个功能强大的数字画板应用，您可以：");
-            ui.label("• 绘制和涂鸦");
-            ui.label("• 使用各种工具进行编辑");
-            ui.label("• 插入图片、文本和形状");
-            ui.label("• 自定义画板设置");
-            ui.label("• 保存与加载画布以保存你的工作");
-            ui.label("• 导出画布为图片");
-            ui.label("• 享受超快的启动速度与超高的流畅度");
+            ui.my_label("这是一个功能强大的数字画板应用，您可以：");
+            ui.my_label("• 绘制和涂鸦");
+            ui.my_label("• 使用各种工具进行编辑");
+            ui.my_label("• 插入图片、文本和形状");
+            ui.my_label("• 自定义画板设置");
+            ui.my_label("• 保存与加载画布以保存你的工作");
+            ui.my_label("• 导出画布为图片");
+            ui.my_label("• 享受超快的启动速度与超高的流畅度");
             ui.separator();
 
             if ui.button("新建画布").clicked() {
@@ -107,14 +107,11 @@ fn collapsing(ui: &mut Ui, section_id: &str, label: &str, add_body: impl FnOnce(
                 ui.style().visuals.widgets.noninteractive.text_color()
             };
             ui.scope_builder(
-                egui::UiBuilder::new()
+                UiBuilder::new()
                     .max_rect(label_rect)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    .layout(Layout::left_to_right(Align::Center)),
                 |ui| {
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(label).color(text_color))
-                            .selectable(false),
-                    );
+                    ui.my_label(RichText::new(label).color(text_color));
                 },
             );
 
@@ -157,7 +154,7 @@ fn collapsing(ui: &mut Ui, section_id: &str, label: &str, add_body: impl FnOnce(
 pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, window: &Arc<Window>) {
     collapsing(ui, "appearance", "外观", |ui| {
         ui.horizontal(|ui| {
-            ui.label("画布颜色:");
+            ui.my_label("画布颜色:");
             if ui
                 .color_edit_button_srgba(&mut state.persistent.canvas_color)
                 .changed()
@@ -182,7 +179,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
 
         ui.horizontal(|ui| {
-            ui.label("主题模式:");
+            ui.my_label("主题模式:");
             if ui
                 .selectable_value(
                     &mut state.persistent.theme_mode,
@@ -214,18 +211,18 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
 
         ui.horizontal(|ui| {
-            ui.label("启动时显示欢迎:");
+            ui.my_label("启动时显示欢迎:");
             ui.checkbox(&mut state.persistent.show_welcome_window_on_start, "");
         });
 
         #[cfg(feature = "startup_animation")]
         ui.horizontal(|ui| {
-            ui.label("显示启动动画:");
+            ui.my_label("显示启动动画:");
             ui.checkbox(&mut state.persistent.show_startup_animation, "");
         });
 
         ui.horizontal(|ui| {
-            ui.label("窗口透明度");
+            ui.my_label("窗口透明度");
             ui.add(egui::Slider::new(
                 &mut state.persistent.window_opacity,
                 0.0..=1.0,
@@ -235,7 +232,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
 
     collapsing(ui, "drawing", "绘制", |ui| {
         ui.horizontal(|ui| {
-            ui.label("画布持久化:");
+            ui.my_label("画布持久化:");
             if ui.button("加载").clicked() {
                 load_canvas_from_file(state);
             }
@@ -246,7 +243,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
 
         if !state.is_overlay_mode {
             ui.horizontal(|ui| {
-                ui.label("画布转换:");
+                ui.my_label("画布转换:");
                 if ui.button("导出为图片").clicked() {
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter("画布文件", IMAGE_FILE_EXTS)
@@ -260,7 +257,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         }
 
         ui.horizontal(|ui| {
-            ui.label("动态画笔宽度微调:");
+            ui.my_label("动态画笔宽度微调:");
             ui.selectable_value(
                 &mut state.dynamic_brush_width_mode,
                 DynamicBrushWidthMode::Disabled,
@@ -279,24 +276,24 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
 
         ui.horizontal(|ui| {
-            ui.label("笔迹平滑:");
+            ui.my_label("笔迹平滑:");
             ui.checkbox(&mut state.persistent.stroke_smoothing, "");
         });
 
         ui.horizontal(|ui| {
-            ui.label("直线停留拉直:");
+            ui.my_label("直线停留拉直:");
             ui.checkbox(&mut state.persistent.stroke_straightening, "启用");
             if state.persistent.stroke_straightening {
                 ui.add(egui::Slider::new(
                     &mut state.persistent.stroke_straightening_tolerance,
                     1.0..=50.0,
                 ));
-                ui.label("灵敏度");
+                ui.my_label("灵敏度");
             }
         });
 
         ui.horizontal(|ui| {
-            ui.label("插值频率:");
+            ui.my_label("插值频率:");
             ui.add(egui::Slider::new(
                 &mut state.persistent.interpolation_frequency,
                 0.0..=1.0,
@@ -304,12 +301,12 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
 
         ui.horizontal(|ui| {
-            ui.label("低延迟模式:");
+            ui.my_label("低延迟模式:");
             ui.checkbox(&mut state.persistent.low_latency_mode, "");
         });
 
         ui.horizontal(|ui| {
-            ui.label("编辑快捷颜色:");
+            ui.my_label("编辑快捷颜色:");
             if ui.button("OK").clicked() {
                 state.show_quick_color_edit_window = true;
             }
@@ -327,7 +324,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                 .pivot(egui::Align2::CENTER_CENTER)
                 .default_pos([center_pos.x, center_pos.y])
                 .show(ctx, |ui| {
-                    ui.label("当前快捷颜色:");
+                    ui.my_label("当前快捷颜色:");
                     ui.separator();
 
                     // 显示当前快捷颜色列表
@@ -352,7 +349,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
 
                     // 添加新颜色
                     ui.horizontal(|ui| {
-                        ui.label("新颜色:");
+                        ui.my_label("新颜色:");
                         ui.color_edit_button_srgba(&mut state.new_quick_color);
                         if ui.button("添加").clicked() {
                             state.persistent.quick_colors.push(state.new_quick_color);
@@ -377,7 +374,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
 
     collapsing(ui, "performance", "性能", |ui| {
         ui.horizontal(|ui| {
-            ui.label("窗口模式:");
+            ui.my_label("窗口模式:");
             if ui
                 .selectable_value(
                     &mut state.persistent.window_mode,
@@ -416,7 +413,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
 
         // 显示模式选择（仅在全屏模式下可用）
         ui.horizontal(|ui| {
-            ui.label("显示模式:");
+            ui.my_label("显示模式:");
 
             // 显示当前选择的视频模式
             if state.persistent.window_mode == WindowMode::ExclusiveFullscreen {
@@ -455,13 +452,13 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                         }
                     });
             } else {
-                ui.label(egui::RichText::new("(仅在独占全屏模式下可切换)").italics());
+                ui.my_label(egui::RichText::new("(仅在独占全屏模式下可切换)").italics());
             }
         });
 
         // 垂直同步模式选择
         ui.horizontal(|ui| {
-            ui.label("垂直同步:");
+            ui.my_label("垂直同步:");
             if ui
                 .selectable_value(
                     &mut state.persistent.present_mode,
@@ -510,7 +507,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
 
         ui.horizontal(|ui| {
-            ui.label("优化策略 [需重启以应用]:");
+            ui.my_label("优化策略 [需重启以应用]:");
             ui.selectable_value(
                 &mut state.persistent.optimization_policy,
                 OptimizationPolicy::Performance,
@@ -525,7 +522,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
 
         let current_backend = state.active_backend.unwrap_or(Backend::Noop);
         ui.horizontal(|ui| {
-            ui.label("图形 API [需重启以应用]:");
+            ui.my_label("图形 API [需重启以应用]:");
             ui.selectable_value(
                 &mut state.persistent.graphics_api,
                 GraphicsApi::Auto,
@@ -579,31 +576,31 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
 
         ui.horizontal(|ui| {
-            ui.label("强制每帧重绘:");
+            ui.my_label("强制每帧重绘:");
             ui.checkbox(&mut state.persistent.force_redraw_every_frame, "");
         });
     });
 
     collapsing(ui, "debug", "调试", |ui| {
         ui.horizontal(|ui| {
-            ui.label("引发异常:");
+            ui.my_label("引发异常:");
             if ui.button("OK").clicked() {
                 panic!("test panic")
             }
         });
 
         ui.horizontal(|ui| {
-            ui.label("显示 FPS:");
+            ui.my_label("显示 FPS:");
             ui.checkbox(&mut state.persistent.show_fps, "");
         });
 
         ui.horizontal(|ui| {
-            ui.label("显示触控点:");
+            ui.my_label("显示触控点:");
             ui.checkbox(&mut state.show_touch_points, "");
         });
 
         ui.horizontal(|ui| {
-            ui.label("压力测试:");
+            ui.my_label("压力测试:");
             if ui.button("OK").clicked() {
                 // 使用固定颜色和宽度
                 const STRESS_COLOR: Color32 = Color32::from_rgb(255, 0, 0); // 红色
@@ -640,7 +637,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
 
         ui.horizontal(|ui| {
-            ui.label("立即保存设置:");
+            ui.my_label("立即保存设置:");
             if ui.button("OK").clicked() {
                 if let Err(err) = state.persistent.save_to_file() {
                     state.toasts.error(format!("设置保存失败: {}!", err));
@@ -649,7 +646,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
 
         ui.horizontal(|ui| {
-            ui.label("重置设置:");
+            ui.my_label("重置设置:");
             if ui.button("OK").clicked() {
                 clear_interaction_state(state);
                 state.persistent = PersistentState::default();
@@ -666,21 +663,21 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         });
 
         ui.horizontal(|ui| {
-            ui.label("???:");
+            ui.my_label("???:");
             ui.checkbox(&mut state.persistent.easter_egg_redo, "");
         });
     });
 
     collapsing(ui, "about", "关于", |ui| {
-        ui.label("uwu (ujhhgtg's whiteboard, unleashed)");
-        ui.label(format!("版本: {}", env!("CARGO_PKG_VERSION")));
-        ui.label(format!("作者: {}", env!("CARGO_PKG_AUTHORS")));
+        ui.my_label("uwu (ujhhgtg's whiteboard, unleashed)");
+        ui.my_label(format!("版本: {}", env!("CARGO_PKG_VERSION")));
+        ui.my_label(format!("作者: {}", env!("CARGO_PKG_AUTHORS")));
     });
 }
 
 pub fn ui_history(state: &mut AppState, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.label("历史记录:");
+        ui.my_label("历史记录:");
         if ui.button("撤销").clicked() {
             state.selected_object_index = None; // prevent selecting phantom object
             if state.history.undo(&mut state.canvas) {
@@ -718,7 +715,7 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
         }
 
         ui.horizontal(|ui| {
-            ui.label("悬浮窗模式:");
+            ui.my_label("悬浮窗模式:");
             if ui.checkbox(&mut state.is_overlay_mode, "").changed() {
                 state.overlay_mode_changed = true;
                 if state.is_overlay_mode {
@@ -742,7 +739,7 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
         });
 
         if state.persistent.show_fps {
-            ui.label(format!("FPS: {}", state.fps_counter.current_fps));
+            ui.my_label(format!("FPS: {}", state.fps_counter.current_fps));
         }
 
         #[cfg(target_os = "windows")]
@@ -967,16 +964,16 @@ pub fn ui_pages_manager(state: &mut AppState, ctx: &Context) {
 
                                         let handle_id = egui::Id::new(("page_drag_handle", i));
                                         let _ = ui.dnd_drag_source(handle_id, i, |ui| {
-                                            ui.label(egui::RichText::new("-").size(16.0));
+                                            ui.my_label(egui::RichText::new("-").size(16.0));
                                         });
 
                                         if is_current {
-                                            ui.label(
+                                            ui.my_label(
                                                 egui::RichText::new(format!("第 {} 页", i + 1))
                                                     .strong(),
                                             );
                                         } else {
-                                            ui.label(format!("第 {} 页", i + 1));
+                                            ui.my_label(format!("第 {} 页", i + 1));
                                         }
 
                                         if ui.button("✓ 保存").clicked() {
@@ -1136,7 +1133,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
             .show(ctx, |ui| {
                 // 工具选择
                 ui.horizontal(|ui| {
-                    ui.label("工具:");
+                    ui.my_label("工具:");
                     // TODO: egui doesn't support rendering fonts with colors
                     let old_tool = state.current_tool;
                     if (state.is_overlay_mode
@@ -1183,11 +1180,13 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                 ui.separator();
 
                 if state.current_tool == CanvasTool::Passthrough {
-                    ui.label(egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics());
+                    ui.my_label(
+                        egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics(),
+                    );
                 } else if state.current_tool == CanvasTool::Select {
                     if let Some(selected_idx) = state.selected_object_index {
                         ui.horizontal(|ui| {
-                            ui.label("对象操作:");
+                            ui.my_label("对象操作:");
                             if ui.button("删除").clicked() {
                                 // Save state to history before modification
                                 let removed_object = state.canvas.objects.remove(selected_idx);
@@ -1271,11 +1270,11 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                             }
                         });
                     } else {
-                        ui.label(egui::RichText::new("(未选中对象)").italics());
+                        ui.my_label(egui::RichText::new("(未选中对象)").italics());
                     }
                 } else if state.current_tool == CanvasTool::Brush {
                     ui.horizontal(|ui| {
-                        ui.label("颜色:");
+                        ui.my_label("颜色:");
                         let old_color = state.brush_color;
                         if ui.color_edit_button_srgba(&mut state.brush_color).changed() {
                             // Drain all active drawing pointers when color changes
@@ -1314,7 +1313,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
 
                     // 颜色快捷按钮
                     ui.horizontal(|ui| {
-                        ui.label("快捷颜色:");
+                        ui.my_label("快捷颜色:");
                         for color in &state.persistent.quick_colors {
                             let color_name = if color.r() == 0 && color.g() == 0 && color.b() == 0 {
                                 "黑"
@@ -1343,7 +1342,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                     });
 
                     ui.horizontal(|ui| {
-                        ui.label("宽度:");
+                        ui.my_label("宽度:");
                         let slider_response =
                             ui.add(egui::Slider::new(&mut state.brush_width, 1.0..=20.0));
 
@@ -1358,7 +1357,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
 
                     // 画笔宽度快捷按钮
                     ui.horizontal(|ui| {
-                        ui.label("快捷宽度:");
+                        ui.my_label("快捷宽度:");
                         if ui.button("小").clicked() {
                             state.brush_width = 1.0;
                         }
@@ -1373,7 +1372,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                     || state.current_tool == CanvasTool::PixelEraser
                 {
                     ui.horizontal(|ui| {
-                        ui.label("大小:");
+                        ui.my_label("大小:");
                         let slider_response =
                             ui.add(egui::Slider::new(&mut state.eraser_size, 5.0..=50.0));
 
@@ -1386,7 +1385,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                     });
 
                     ui.horizontal(|ui| {
-                        ui.label("清空:");
+                        ui.my_label("清空:");
                         if ui.button("OK").clicked() {
                             // Save state to history before modification
                             let old_objects = std::mem::take(&mut state.canvas.objects);
@@ -1477,7 +1476,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                             .default_pos([center_pos.x, center_pos.y])
                             .show(ctx, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label("文本内容:");
+                                    ui.my_label("文本内容:");
                                     ui.text_edit_singleline(&mut state.new_text_content);
                                 });
 
@@ -1529,7 +1528,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                             .pivot(egui::Align2::CENTER_CENTER)
                             .default_pos([center_pos.x, center_pos.y])
                             .show(ctx, |ui| {
-                                ui.label("选择要插入的形状:");
+                                ui.my_label("选择要插入的形状:");
 
                                 ui.horizontal(|ui| {
                                     if ui.button("线").clicked() {

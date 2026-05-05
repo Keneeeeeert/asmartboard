@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use egui::{Color32, Context, FontDefinitions, Pos2, Visuals};
+use egui::{
+    Color32, Context, FontDefinitions, Label, Pos2, Response, Ui, Visuals, Widget, WidgetText,
+};
 use egui_notify::Toasts;
 use winit::window::{Fullscreen, Window};
 
@@ -165,4 +167,15 @@ pub fn cursor_pos_phys_to_logic(ctx: &Context, pos: utils::cursor_pos::Point) ->
         pos.x as f32 / pixels_per_point,
         pos.y as f32 / pixels_per_point,
     )
+}
+
+pub trait UiExtras {
+    fn my_label(&mut self, text: impl Into<WidgetText>) -> Response;
+}
+
+impl UiExtras for Ui {
+    #[inline(always)]
+    fn my_label(&mut self, text: impl Into<WidgetText>) -> Response {
+        Label::new(text).selectable(false).ui(self)
+    }
 }
