@@ -8,7 +8,7 @@ repository = "https://github.com/Ujhhgtg/uwu/"
 license-file = "LICENSE"
 
 [features]
-default = ["system_font", "x11"]
+default = ["system_font", "wayland"]
 startup_animation = ["rodio"]
 embedded_font = []
 system_font = ["fontdb"]

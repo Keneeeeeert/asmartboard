@@ -88,13 +88,11 @@ egui + wgpu + winit
 
 ## supported platforms
 
-- windows: overlay mode only works under dx12 (default backend for windows)
+- windows
 
 - macos (untested)
 
-- linux: overlay mode only works under x11 (cursor position cannot be retrieved under wayland or xwayland when window loses focus)
-
-  use feature `x11` to compile with x11 on linux
+- linux (mouse passthrough support might vary from DE/WMs; it is recommended to use default `wayland`; you can use `--no-default-features --features x11` if you insist; tested: GNOME (mutter), KDE (KWin), Hyprland)
 
 ## credits
 
