@@ -581,6 +581,7 @@ pub fn rasterize_text(
                     width: StrokeWidth::Fixed(1.0),
                     color: text.color,
                     base_width: text.font_size,
+                    shape: None,
                 });
             }
 

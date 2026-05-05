@@ -131,6 +131,7 @@ impl<'a> From<&'a ArchivedCanvasStateFlat> for CanvasState {
                             s.color[0], s.color[1], s.color[2], s.color[3],
                         ),
                         base_width: s.base_width.into(),
+                        shape: None,
                     }),
                     ArchivedCanvasObjectFlat::Text(t) => CanvasObject::Text(CanvasText {
                         text: t.text.as_str().to_string(),

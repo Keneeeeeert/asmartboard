@@ -4,6 +4,20 @@ a high-performance whiteboard app written in rust
 
 reinventing the wheel because ~~others suck~~ why not
 
+## features
+
+- lightning-fast startup speed
+
+- good framerates
+
+- multi-touch support for every tool
+
+- overlay mode with 100% feature parity with standard mode
+
+- first-class linux support
+
+- awesome name
+
 ## building
 
 ### prepare

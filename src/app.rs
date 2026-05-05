@@ -3,7 +3,8 @@ use crate::render::RenderState;
 #[cfg(feature = "startup_animation")]
 use crate::state::StartupAnimation;
 use crate::state::{
-    AppState, CanvasObject, CanvasObjectOps, CanvasTool, PointerInteraction, PointerState,
+    AppState, CanvasObject, CanvasObjectOps, CanvasTool, InsertTab, PointerInteraction,
+    PointerState,
 };
 use crate::ui;
 use crate::utils::stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start};
@@ -581,6 +582,24 @@ impl ApplicationHandler<()> for App {
                                 },
                             );
                         }
+                        CanvasTool::Insert
+                            if self.state.current_insert_tab == InsertTab::Shape
+                                && self.state.selected_shape_type.is_some() =>
+                        {
+                            let shape_type = self.state.selected_shape_type.unwrap();
+                            self.state.pointers.insert(
+                                id,
+                                PointerState {
+                                    id,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::ShapeInsert {
+                                        start_pos: pos,
+                                        shape_type,
+                                    },
+                                },
+                            );
+                        }
                         _ => {}
                     },
                     TouchPhase::Moved => match self.state.current_tool {
@@ -628,6 +647,11 @@ impl ApplicationHandler<()> for App {
                                 pointer.pos = pos;
                             }
                         }
+                        CanvasTool::Insert => {
+                            if let Some(pointer) = self.state.pointers.get_mut(&id) {
+                                pointer.pos = pos;
+                            }
+                        }
                         _ => {}
                     },
                     TouchPhase::Ended | TouchPhase::Cancelled => match self.state.current_tool {
@@ -670,6 +694,23 @@ impl ApplicationHandler<()> for App {
                         }
                         CanvasTool::ObjectEraser | CanvasTool::PixelEraser => {
                             self.state.pointers.remove(&id);
+                        }
+                        CanvasTool::Insert => {
+                            if let Some(pointer) = self.state.pointers.remove(&id) {
+                                if let PointerInteraction::ShapeInsert {
+                                    start_pos,
+                                    shape_type,
+                                } = pointer.interaction
+                                {
+                                    let end_pos = pointer.pos;
+                                    crate::utils::ui::create_shape_object(
+                                        &mut self.state,
+                                        shape_type,
+                                        start_pos,
+                                        end_pos,
+                                    );
+                                }
+                            }
                         }
                         _ => {}
                     },

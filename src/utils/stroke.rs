@@ -155,6 +155,7 @@ pub fn brush_stroke_end(state: &mut AppState, pointer_id: u64) {
         width,
         color: state.brush_color,
         base_width: state.brush_width,
+        shape: None,
     };
     let index = state.canvas.objects.len();
     state

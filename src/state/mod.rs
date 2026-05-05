@@ -151,6 +151,15 @@ pub enum CanvasTool {
     Passthrough, // Only available in passthrough mode; passes clicks through to underlying windows
 }
 
+/// Tabs within the Insert tool
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum InsertTab {
+    #[default]
+    Shape,
+    Text,
+    Image,
+}
+
 /// Trait for objects that can be rendered on the canvas
 pub trait CanvasObjectOps {
     /// Renders the object using the provided painter
@@ -376,7 +385,7 @@ impl CanvasObjectOps for CanvasText {
 }
 
 /// Available shape types for the canvas
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CanvasShapeType {
     Line,
     Arrow,
@@ -888,6 +897,7 @@ pub struct CanvasStroke {
     pub width: StrokeWidth,
     pub color: Color32,
     pub base_width: f32,
+    pub shape: Option<CanvasShapeType>,
 }
 
 impl CanvasObjectOps for CanvasStroke {
@@ -1079,6 +1089,10 @@ pub enum PointerInteraction {
         drag_accumulated_delta: egui::Vec2,
     },
     Erasing,
+    ShapeInsert {
+        start_pos: Pos2,
+        shape_type: CanvasShapeType,
+    },
 }
 
 /// Represents a single pointer (touch or mouse) on the canvas
@@ -1465,13 +1479,16 @@ pub struct AppState {
     pub history: History,                                // 当前页面的历史记录
     pub pages: Vec<PageState>,                           // 分页
     pub current_page: usize,                             // 当前页码
-    pub pointers: HashMap<u64, PointerState>, // 统一指针状态表（鼠标 id=0，触控使用 winit touch id）
+    pub pointers: HashMap<u64, PointerState>, // 统一指针状态表 (鼠标 id=0，触控使用 winit touch id)
     pub brush_color: Color32,                 // 画笔颜色
     pub brush_width: f32,                     // 画笔大小
     pub dynamic_brush_width_mode: DynamicBrushWidthMode, // 动态画笔大小微调
     pub current_tool: CanvasTool,             // 当前工具
+    pub current_insert_tab: InsertTab,        // 插入工具的当前标签页
+    pub selected_shape_type: Option<CanvasShapeType>, // 插入形状时选中的形状类型
+    pub continuous_insert: bool,              // 是否连续插入形状
+    pub shapes_inserted_count: u32,           // 已插入形状的计数
     pub eraser_size: f32,                     // 橡皮擦大小
-    pub eraser_prev_mouse_pos: Option<Pos2>,  // 上一帧鼠标橡皮擦位置（用于插值）
     pub selected_object_index: Option<usize>, // 选中的对象索引（全局共享）
 
     // persistent states
@@ -1479,8 +1496,6 @@ pub struct AppState {
 
     // ui states
     pub show_quick_color_edit_window: bool, // 是否显示快捷颜色编辑器
-    pub show_insert_text_window: bool,
-    pub show_insert_shape_window: bool,
     pub show_welcome_window: bool,
     pub show_page_management_window: bool,
 
@@ -1525,15 +1540,16 @@ impl Default for AppState {
             brush_width: 3.0,
             dynamic_brush_width_mode: DynamicBrushWidthMode::default(),
             current_tool: CanvasTool::Brush,
+            current_insert_tab: InsertTab::Shape,
+            selected_shape_type: None,
+            continuous_insert: false,
+            shapes_inserted_count: 0,
             eraser_size: 10.0,
-            eraser_prev_mouse_pos: None,
             selected_object_index: None,
             show_size_preview: false,
             fps_counter: FpsCounter::new(),
             should_quit: false,
-            show_insert_text_window: false,
             new_text_content: "".to_string(),
-            show_insert_shape_window: false,
             fullscreen_video_modes: Vec::new(),
             selected_video_mode_index: None,
             show_quick_color_edit_window: false,
