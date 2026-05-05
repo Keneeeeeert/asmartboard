@@ -150,6 +150,7 @@ impl EguiRenderer {
         egui_context.memory_mut(|memory| {
             memory.options.tessellation_options.prerasterized_discs = true;
             memory.options.tessellation_options.parallel_tessellation = true;
+            memory.options.zoom_with_keyboard = false;
         });
 
         EguiRenderer {
@@ -193,25 +194,6 @@ impl EguiRenderer {
         let tris = {
             #[cfg(feature = "profiling")]
             profiling::scope!("egui::tessellate");
-            // println!("total shapes: {}", &full_output.shapes.len());
-            // println!(
-            //     "path shapes: {}",
-            //     &full_output
-            //         .shapes
-            //         .iter()
-            //         .filter(|s| {
-            //             {
-            //                 if let egui::Shape::Path(path) = &s.shape
-            //                     && path.points.len() > 32
-            //                 {
-            //                     true
-            //                 } else {
-            //                     false
-            //                 }
-            //             }
-            //         })
-            //         .count()
-            // );
             self.state
                 .egui_ctx()
                 .tessellate(full_output.shapes, self.pixels_per_point)
@@ -230,6 +212,7 @@ impl EguiRenderer {
             self.renderer
                 .update_buffers(device, queue, encoder, &tris, &screen_descriptor);
         }
+
         let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("egui main render pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {

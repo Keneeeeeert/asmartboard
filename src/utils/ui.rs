@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use egui::{Color32, Context, FontDefinitions, Pos2, Visuals};
 use egui_notify::Toasts;
-use winit::window::{Fullscreen, Window, WindowLevel};
+use winit::window::{Fullscreen, Window};
 
 use crate::{
     assets,
@@ -45,7 +45,6 @@ pub fn apply_window_mode(state: &mut AppState, window: &Arc<Window>) {
         WindowMode::Windowed => {
             // 窗口化
             window.set_fullscreen(None);
-            window.set_window_level(WindowLevel::Normal);
         }
         WindowMode::ExclusiveFullscreen => {
             // 全屏
@@ -67,13 +66,10 @@ pub fn apply_window_mode(state: &mut AppState, window: &Arc<Window>) {
                     .expect("no video mode available")
                     .clone(),
             )));
-
-            window.set_window_level(WindowLevel::AlwaysOnTop);
         }
         WindowMode::BorderlessFullscreen => {
             // 无边框全屏
             window.set_fullscreen(Some(Fullscreen::Borderless(window.current_monitor())));
-            window.set_window_level(WindowLevel::AlwaysOnTop);
         }
     }
 }

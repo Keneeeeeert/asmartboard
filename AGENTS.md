@@ -29,4 +29,3 @@ cargo clippy --release
 - App logic: `src/app.rs`
 - Utilities: `src/utils/*.rs`
 - UI content: `src/ui.rs`
-

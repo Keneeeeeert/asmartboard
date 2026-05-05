@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use egui::{Button, Color32, Context, Pos2, Rect, Stroke, Ui};
 use wgpu::{Backend, PresentMode};
-use winit::window::Window;
+use winit::window::{Window, WindowLevel};
 
 use crate::{
     assets,
@@ -161,6 +161,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             if ui
                 .color_edit_button_srgba(&mut state.persistent.canvas_color)
                 .changed()
+                && !state.is_overlay_mode
             {
                 apply_theme_mode_and_canvas_color(
                     ctx,
@@ -170,11 +171,13 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             }
             if ui.button("重置").clicked() {
                 state.persistent.canvas_color = utils::get_default_canvas_color();
-                apply_theme_mode_and_canvas_color(
-                    ctx,
-                    state.persistent.theme_mode,
-                    state.persistent.canvas_color,
-                );
+                if !state.is_overlay_mode {
+                    apply_theme_mode_and_canvas_color(
+                        ctx,
+                        state.persistent.theme_mode,
+                        state.persistent.canvas_color,
+                    );
+                }
             }
         });
 
@@ -241,18 +244,20 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             }
         });
 
-        ui.horizontal(|ui| {
-            ui.label("画布转换:");
-            if ui.button("导出为图片").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("画布文件", IMAGE_FILE_EXTS)
-                    .set_file_name("canvas.bmp")
-                    .save_file()
-                {
-                    state.screenshot_path = Some(path);
+        if !state.is_overlay_mode {
+            ui.horizontal(|ui| {
+                ui.label("画布转换:");
+                if ui.button("导出为图片").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("画布文件", IMAGE_FILE_EXTS)
+                        .set_file_name("canvas.bmp")
+                        .save_file()
+                    {
+                        state.screenshot_path = Some(path);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         ui.horizontal(|ui| {
             ui.label("动态画笔宽度微调:");
@@ -648,11 +653,13 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
             if ui.button("OK").clicked() {
                 clear_interaction_state(state);
                 state.persistent = PersistentState::default();
-                apply_theme_mode_and_canvas_color(
-                    ctx,
-                    state.persistent.theme_mode,
-                    state.persistent.canvas_color,
-                );
+                if !state.is_overlay_mode {
+                    apply_theme_mode_and_canvas_color(
+                        ctx,
+                        state.persistent.theme_mode,
+                        state.persistent.canvas_color,
+                    );
+                }
                 state.present_mode_changed = true;
                 apply_window_mode(state, window);
             }
@@ -715,12 +722,14 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
             if ui.checkbox(&mut state.is_overlay_mode, "").changed() {
                 state.overlay_mode_changed = true;
                 if state.is_overlay_mode {
+                    window.set_window_level(WindowLevel::AlwaysOnTop);
                     state.current_tool = CanvasTool::Passthrough;
                 } else {
+                    window.set_window_level(WindowLevel::Normal);
                     state.current_tool = CanvasTool::Brush;
                 }
                 clear_interaction_state(state);
-                utils::ui::apply_theme_mode_and_canvas_color(
+                apply_theme_mode_and_canvas_color(
                     ui.ctx(),
                     state.persistent.theme_mode,
                     if state.is_overlay_mode {
@@ -799,7 +808,7 @@ pub fn ui_window_controls(state: &mut AppState, ui: &mut Ui, window: &Arc<Window
 }
 
 pub fn ui_pages_nav(state: &mut AppState, ctx: &Context) -> Option<(Rect, Rect)> {
-    if state.screenshot_path.is_some() || state.is_overlay_mode {
+    if state.screenshot_path.is_some() {
         return None;
     }
 

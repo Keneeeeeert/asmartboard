@@ -72,6 +72,16 @@ cargo build --release --target aarch64-pc-windows-gnullvm
 
 egui + wgpu + winit
 
+## supported platforms
+
+- windows: overlay mode only works under dx12 (default backend for windows)
+
+- macos (untested)
+
+- linux: overlay mode only works under x11 (cursor position cannot be retrieved under wayland or xwayland when window loses focus)
+
+  use feature `x11` to compile with x11 on linux
+
 ## credits
 
 [noto cjk](https://github.com/notofonts/noto-cjk)
