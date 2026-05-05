@@ -28,8 +28,12 @@ impl App {
             .with_transparent(false)
             .with_inner_size(window_size)
             .with_resizable(false)
-            .with_skip_taskbar(true)
-            .with_decorations(false);
+            .with_decorations(true);
+
+        #[cfg(target_os = "windows")]
+        {
+            attrs = attrs.with_skip_taskbar(false);
+        }
 
         if let Some(monitor) = event_loop.primary_monitor() {
             let monitor_size = monitor.size();
