@@ -30,7 +30,7 @@ use crate::utils;
 /// Magic header for canvas files: `b"UWU"` followed by format version byte.
 /// Must be kept in sync with [`CANVAS_FILE_HEADER`].
 const CANVAS_FILE_MAGIC: &[u8; 3] = b"UWU";
-const CANVAS_FILE_VERSION: u8 = 1;
+const CANVAS_FILE_VERSION: u8 = 2;
 
 fn make_canvas_file_header() -> [u8; 4] {
     let mut h = [0u8; 4];
@@ -124,7 +124,7 @@ impl From<Vec<f32>> for StrokeWidth {
     }
 }
 
-/// Transform handle types for object manipulation (resize and rotate)
+/// Transform handle types for object manipulation (resize)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TransformHandle {
     // 8 resize handles around the bounding box
@@ -136,8 +136,6 @@ pub enum TransformHandle {
     BottomLeft,
     Bottom,
     BottomRight,
-    // Rotation handle
-    Rotate,
 }
 
 /// Available tools for canvas interaction
@@ -176,7 +174,6 @@ pub struct CanvasImage {
     pub pos: Pos2,
     pub size: egui::Vec2,
     pub aspect_ratio: f32,
-    pub rot: f32,
     pub marked_for_deletion: bool, // Deferred deletion to avoid borrow checker issues
     pub image_data: Arc<[u8]>,     // RGBA pixel data for export
     pub image_size: [u32; 2],      // [width, height] of the original image
@@ -250,9 +247,6 @@ impl CanvasObjectOps for CanvasImage {
                 );
                 self.size = new_size;
             }
-            TransformHandle::Rotate => {
-                // For now, ignore rotation for images
-            }
         }
     }
 
@@ -306,7 +300,6 @@ pub struct CanvasText {
     pub pos: Pos2,
     pub color: Color32,
     pub font_size: f32,
-    pub rot: f32,
     pub cached_size: Option<egui::Vec2>,
 }
 
@@ -333,7 +326,6 @@ impl CanvasObjectOps for CanvasText {
                 self.font_size = (self.font_size * scale_factor).max(6.0);
                 self.cached_size = None;
             }
-            TransformHandle::Rotate => {}
         }
     }
 
@@ -364,7 +356,7 @@ impl CanvasObjectOps for CanvasText {
             galley: text_galley.clone(),
             underline: egui::Stroke::NONE,
             override_text_color: None,
-            angle: self.rot,
+            angle: 0.0,
             fallback_color: self.color,
             opacity_factor: 1.0,
         };
@@ -400,7 +392,6 @@ pub struct CanvasShape {
     pub pos: Pos2,
     pub size: f32,
     pub color: Color32,
-    pub rotation: f32,
 }
 
 impl CanvasObjectOps for CanvasShape {
@@ -425,9 +416,6 @@ impl CanvasObjectOps for CanvasShape {
                 // Scale the shape size uniformly
                 let scale_factor = 1.0 + (delta.x + delta.y) / 200.0;
                 self.size = (self.size * scale_factor).max(10.0);
-            }
-            TransformHandle::Rotate => {
-                // Rotation not yet implemented for shapes
             }
         }
     }
@@ -574,29 +562,28 @@ impl CanvasObject {
         }
     }
 
-    /// Extracts transform information (position, size, rotation) from an object
+    /// Extracts transform information (position, size) from an object
     pub fn get_transform(&self) -> ObjectTransform {
         match self {
             CanvasObject::Image(img) => ObjectTransform {
                 pos: img.pos,
                 size: img.size,
-                rotation: img.rot,
             },
             CanvasObject::Text(text) => ObjectTransform {
                 pos: text.pos,
                 size: egui::vec2(text.font_size, text.font_size), // Using font_size for both dimensions
-                rotation: text.rot,
             },
             CanvasObject::Shape(shape) => ObjectTransform {
                 pos: shape.pos,
                 size: egui::vec2(shape.size, shape.size), // Using shape.size for both dimensions
-                rotation: shape.rotation,
             },
-            CanvasObject::Stroke(_stroke) => ObjectTransform {
-                pos: egui::Pos2::new(0.0, 0.0), // Strokes don't have a single position
-                size: egui::Vec2::new(0.0, 0.0), // Strokes don't have a single size
-                rotation: 0.0,                  // Strokes handle rotation differently
-            },
+            CanvasObject::Stroke(stroke) => {
+                let bbox = stroke.bounding_box();
+                ObjectTransform {
+                    pos: bbox.min,
+                    size: bbox.size(),
+                }
+            }
         }
     }
 }
@@ -901,36 +888,6 @@ pub struct CanvasStroke {
     pub width: StrokeWidth,
     pub color: Color32,
     pub base_width: f32,
-    pub rot: f32,
-}
-
-impl CanvasStroke {
-    #[cfg_attr(feature = "profiling", profiling::function)]
-    fn scale_stroke_points(stroke: &mut CanvasStroke, center: Pos2, scale_x: f32, scale_y: f32) {
-        for point in &mut stroke.points {
-            let relative = *point - center;
-            point.x = center.x + relative.x * scale_x;
-            point.y = center.y + relative.y * scale_y;
-        }
-        // Scale widths proportionally
-        let avg_scale = (scale_x + scale_y) / 2.0;
-        match &mut stroke.width {
-            StrokeWidth::Fixed(w) => *w *= avg_scale,
-            StrokeWidth::Dynamic(v) => {
-                for width in v.iter_mut() {
-                    *width *= avg_scale;
-                }
-            }
-        }
-    }
-
-    fn move_stroke_to_center(stroke: &mut CanvasStroke, new_center: Pos2) {
-        let current_center = stroke.bounding_box().center();
-        let offset = new_center - current_center;
-        for point in &mut stroke.points {
-            *point += offset;
-        }
-    }
 }
 
 impl CanvasObjectOps for CanvasStroke {
@@ -938,80 +895,52 @@ impl CanvasObjectOps for CanvasStroke {
     fn transform(
         &mut self,
         handle: TransformHandle,
-        delta: egui::Vec2,
+        _delta: egui::Vec2,
         _drag_start: Pos2,
-        _current_pos: Pos2,
+        current_pos: Pos2,
     ) {
         let bbox = self.bounding_box();
-        let center = bbox.center();
+        if bbox.width() < 1.0 || bbox.height() < 1.0 {
+            return;
+        }
 
-        // Calculate scale factors
-        let scale_x = if bbox.width() > 0.0 {
-            (bbox.width() + delta.x) / bbox.width()
-        } else {
-            1.0
-        };
-        let scale_y = if bbox.height() > 0.0 {
-            (bbox.height() + delta.y) / bbox.height()
-        } else {
-            1.0
+        let (new_min, new_max) = match handle {
+            TransformHandle::TopLeft => (current_pos, bbox.max),
+            TransformHandle::Top => (Pos2::new(bbox.min.x, current_pos.y), bbox.max),
+            TransformHandle::TopRight => (
+                Pos2::new(bbox.min.x, current_pos.y),
+                Pos2::new(current_pos.x, bbox.max.y),
+            ),
+            TransformHandle::Left => (Pos2::new(current_pos.x, bbox.min.y), bbox.max),
+            TransformHandle::Right => (bbox.min, Pos2::new(current_pos.x, bbox.max.y)),
+            TransformHandle::BottomLeft => (
+                Pos2::new(current_pos.x, bbox.min.y),
+                Pos2::new(bbox.max.x, current_pos.y),
+            ),
+            TransformHandle::Bottom => (bbox.min, Pos2::new(bbox.max.x, current_pos.y)),
+            TransformHandle::BottomRight => (bbox.min, current_pos),
         };
 
-        match handle {
-            TransformHandle::TopLeft => {
-                let scale = scale_x.min(scale_y);
-                Self::scale_stroke_points(self, center, scale, scale);
-                // Adjust position
-                let new_center = center + delta / 2.0;
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Top => {
-                Self::scale_stroke_points(self, center, 1.0, scale_y);
-                let new_center = Pos2::new(center.x, center.y + delta.y / 2.0);
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::TopRight => {
-                let scale = scale_x.min(scale_y);
-                Self::scale_stroke_points(self, center, scale, scale);
-                let new_center = center + delta / 2.0;
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Left => {
-                Self::scale_stroke_points(self, center, scale_x, 1.0);
-                let new_center = Pos2::new(center.x + delta.x / 2.0, center.y);
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Right => {
-                Self::scale_stroke_points(self, center, scale_x, 1.0);
-                let new_center = Pos2::new(center.x + delta.x / 2.0, center.y);
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::BottomLeft => {
-                let scale = scale_x.min(scale_y);
-                Self::scale_stroke_points(self, center, scale, scale);
-                let new_center = center + delta / 2.0;
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Bottom => {
-                Self::scale_stroke_points(self, center, 1.0, scale_y);
-                let new_center = Pos2::new(center.x, center.y + delta.y / 2.0);
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::BottomRight => {
-                let scale = scale_x.min(scale_y);
-                Self::scale_stroke_points(self, center, scale, scale);
-                let new_center = center + delta / 2.0;
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Rotate => {
-                // Calculate rotation angle based on drag
-                let center = bbox.center();
-                let current_angle = (_current_pos - center).angle();
-                let start_angle = (_drag_start - center).angle();
-                let delta_angle = current_angle - start_angle;
-                self.rot += delta_angle;
+        let new_width = (new_max.x - new_min.x).max(10.0);
+        let new_height = (new_max.y - new_min.y).max(10.0);
+        let scale_x = new_width / bbox.width();
+        let scale_y = new_height / bbox.height();
+        let avg_scale = (scale_x + scale_y) / 2.0;
+
+        for point in &mut self.points {
+            point.x = new_min.x + (point.x - bbox.min.x) * scale_x;
+            point.y = new_min.y + (point.y - bbox.min.y) * scale_y;
+        }
+
+        match &mut self.width {
+            StrokeWidth::Fixed(w) => *w = (*w * avg_scale).max(1.0),
+            StrokeWidth::Dynamic(widths) => {
+                for w in widths.iter_mut() {
+                    *w = (*w * avg_scale).max(1.0);
+                }
             }
         }
+        self.base_width = (self.base_width * avg_scale).max(1.0);
     }
 
     #[cfg_attr(feature = "profiling", profiling::function)]
@@ -1047,59 +976,35 @@ impl CanvasObjectOps for CanvasStroke {
     fn paint(&self, painter: &egui::Painter, selected: bool) {
         let color = if selected { Color32::BLUE } else { self.color };
 
-        // Apply rotation if needed
-        let rotated_points: std::borrow::Cow<'_, [Pos2]> = if self.rot.abs() > 0.001 {
-            let center = self.bounding_box().center();
-            let cos_rot = self.rot.cos();
-            let sin_rot = self.rot.sin();
-            std::borrow::Cow::Owned(
-                self.points
-                    .iter()
-                    .map(|p| {
-                        let dx = p.x - center.x;
-                        let dy = p.y - center.y;
-                        Pos2::new(
-                            center.x + dx * cos_rot - dy * sin_rot,
-                            center.y + dx * sin_rot + dy * cos_rot,
-                        )
-                    })
-                    .collect(),
-            )
-        } else {
-            std::borrow::Cow::Borrowed(&self.points)
-        };
-
         painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-            rotated_points[0],
+            self.points[0],
             self.width.first() / 2.0,
             color,
         )));
-        if rotated_points.len() >= 2 {
+        if self.points.len() >= 2 {
             painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-                rotated_points[rotated_points.len() - 1],
+                self.points[self.points.len() - 1],
                 self.width.last() / 2.0,
                 color,
             )));
             match &self.width {
                 StrokeWidth::Fixed(w) => {
-                    if rotated_points.len() == 2 {
-                        painter.line_segment(
-                            [rotated_points[0], rotated_points[1]],
-                            Stroke::new(*w, color),
-                        );
+                    if self.points.len() == 2 {
+                        painter
+                            .line_segment([self.points[0], self.points[1]], Stroke::new(*w, color));
                     } else {
                         let path = egui::epaint::PathShape::line(
-                            rotated_points.into_owned(),
+                            self.points.clone(),
                             Stroke::new(*w, color),
                         );
                         painter.add(egui::Shape::Path(path));
                     }
                 }
                 StrokeWidth::Dynamic(widths) => {
-                    for i in 0..rotated_points.len() - 1 {
+                    for i in 0..self.points.len() - 1 {
                         let avg_width = (widths[i] + widths[i + 1]) / 2.0;
                         painter.line_segment(
-                            [rotated_points[i], rotated_points[i + 1]],
+                            [self.points[i], self.points[i + 1]],
                             Stroke::new(avg_width, color),
                         );
                     }
@@ -1334,7 +1239,6 @@ pub enum HistoryCommand {
 pub struct ObjectTransform {
     pub pos: egui::Pos2,
     pub size: egui::Vec2,
-    pub rotation: f32,
 }
 
 // 历史记录结构
@@ -1521,9 +1425,29 @@ impl History {
             CanvasObject::Shape(shape) => {
                 shape.pos = transform.pos;
                 shape.size = transform.size.x;
-                shape.rotation = transform.rotation;
             }
-            CanvasObject::Stroke(_) => {}
+            CanvasObject::Stroke(stroke) => {
+                let old_bbox = stroke.bounding_box();
+                if old_bbox.width() < 1.0 || old_bbox.height() < 1.0 {
+                    return;
+                }
+                let scale_x = transform.size.x / old_bbox.width();
+                let scale_y = transform.size.y / old_bbox.height();
+                let avg_scale = (scale_x + scale_y) / 2.0;
+                for point in &mut stroke.points {
+                    point.x = transform.pos.x + (point.x - old_bbox.min.x) * scale_x;
+                    point.y = transform.pos.y + (point.y - old_bbox.min.y) * scale_y;
+                }
+                match &mut stroke.width {
+                    StrokeWidth::Fixed(w) => *w = (*w * avg_scale).max(1.0),
+                    StrokeWidth::Dynamic(widths) => {
+                        for w in widths.iter_mut() {
+                            *w = (*w * avg_scale).max(1.0);
+                        }
+                    }
+                }
+                stroke.base_width = (stroke.base_width * avg_scale).max(1.0);
+            }
         }
     }
 }

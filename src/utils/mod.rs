@@ -498,16 +498,6 @@ pub fn draw_resize_handles(painter: &egui::Painter, bbox: Rect) {
         painter.rect_stroke(handle_rect, 0.0, handle_stroke, egui::StrokeKind::Outside);
     }
 
-    // 旋转句柄（在顶部稍微上方）
-    let rotate_pos = Pos2::new(bbox.center().x, bbox.top() - 20.0);
-    painter.circle_filled(rotate_pos, handle_size / 2.0, handle_fill);
-    painter.circle_stroke(rotate_pos, handle_size / 2.0, handle_stroke);
-
-    // 绘制旋转指示线
-    painter.line_segment(
-        [bbox.center_top(), rotate_pos],
-        Stroke::new(1.0_f32, Color32::GRAY),
-    );
 }
 
 // 获取鼠标位置下的调整句柄
@@ -542,14 +532,6 @@ pub fn get_transform_handle_at_pos(bbox: Rect, pos: Pos2) -> Option<TransformHan
         if handle_rect.contains(pos) {
             return Some(*handle_type);
         }
-    }
-
-    // 检查旋转句柄
-    let rotate_pos = Pos2::new(bbox.center().x, bbox.top() - 20.0);
-    let rotate_rect =
-        Rect::from_center_size(rotate_pos, egui::vec2(handle_hit_size, handle_hit_size));
-    if rotate_rect.contains(pos) {
-        return Some(TransformHandle::Rotate);
     }
 
     None
@@ -599,7 +581,6 @@ pub fn rasterize_text(
                     width: StrokeWidth::Fixed(1.0),
                     color: text.color,
                     base_width: text.font_size,
-                    rot: 0.0,
                 });
             }
 

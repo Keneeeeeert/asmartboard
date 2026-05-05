@@ -28,7 +28,6 @@ pub struct StrokeFlat {
     pub width: StrokeWidthFlat,
     pub color: [u8; 4],
     pub base_width: f32,
-    pub rot: f32,
 }
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone)]
@@ -45,7 +44,6 @@ pub struct TextFlat {
     pub pos: [f32; 2],
     pub color: [u8; 4],
     pub font_size: f32,
-    pub rot: f32,
 }
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone)]
@@ -55,7 +53,6 @@ pub struct ShapeFlat {
     pub pos: [f32; 2],
     pub size: f32,
     pub color: [u8; 4],
-    pub rotation: f32,
 }
 
 #[derive(Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone)]
@@ -85,14 +82,12 @@ impl From<&CanvasState> for CanvasStateFlat {
                         },
                         color: [s.color.r(), s.color.g(), s.color.b(), s.color.a()],
                         base_width: s.base_width,
-                        rot: s.rot,
                     })),
                     CanvasObject::Text(t) => Some(CanvasObjectFlat::Text(TextFlat {
                         text: t.text.clone(),
                         pos: [t.pos.x, t.pos.y],
                         color: [t.color.r(), t.color.g(), t.color.b(), t.color.a()],
                         font_size: t.font_size,
-                        rot: t.rot,
                     })),
                     CanvasObject::Shape(s) => Some(CanvasObjectFlat::Shape(ShapeFlat {
                         shape_type: match s.shape_type {
@@ -105,7 +100,6 @@ impl From<&CanvasState> for CanvasStateFlat {
                         pos: [s.pos.x, s.pos.y],
                         size: s.size,
                         color: [s.color.r(), s.color.g(), s.color.b(), s.color.a()],
-                        rotation: s.rotation,
                     })),
                     CanvasObject::Image(_) => None,
                 })
@@ -137,7 +131,6 @@ impl<'a> From<&'a ArchivedCanvasStateFlat> for CanvasState {
                             s.color[0], s.color[1], s.color[2], s.color[3],
                         ),
                         base_width: s.base_width.into(),
-                        rot: s.rot.into(),
                     }),
                     ArchivedCanvasObjectFlat::Text(t) => CanvasObject::Text(CanvasText {
                         text: t.text.as_str().to_string(),
@@ -146,7 +139,6 @@ impl<'a> From<&'a ArchivedCanvasStateFlat> for CanvasState {
                             t.color[0], t.color[1], t.color[2], t.color[3],
                         ),
                         font_size: t.font_size.into(),
-                        rot: t.rot.into(),
                         cached_size: None,
                     }),
                     ArchivedCanvasObjectFlat::Shape(s) => CanvasObject::Shape(CanvasShape {
@@ -162,7 +154,6 @@ impl<'a> From<&'a ArchivedCanvasStateFlat> for CanvasState {
                         color: Color32::from_rgba_unmultiplied(
                             s.color[0], s.color[1], s.color[2], s.color[3],
                         ),
-                        rotation: s.rotation.into(),
                     }),
                 })
                 .collect(),

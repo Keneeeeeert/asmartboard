@@ -628,7 +628,7 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
                         width: STRESS_WIDTH.into(),
                         color: STRESS_COLOR,
                         base_width: STRESS_WIDTH,
-                        rot: 0.0,
+
                     };
 
                     state.canvas.objects.push(CanvasObject::Stroke(stroke));
@@ -1302,7 +1302,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                                                 width: active_stroke.width,
                                                 color: old_color,
                                                 base_width: state.brush_width,
-                                                rot: 0.0,
+                        
                                             },
                                         ));
                                     }
@@ -1441,7 +1441,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                                         size: egui::vec2(target_width, target_height),
                                         aspect_ratio,
                                         marked_for_deletion: false,
-                                        rot: 0.0,
+                
                                         image_data,
                                         image_size: [width, height],
                                     };
@@ -1495,7 +1495,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                                             pos: Pos2::new(100.0, 100.0),
                                             color: Color32::WHITE,
                                             font_size: 16.0,
-                                            rot: 0.0,
+                    
                                             cached_size: Some(text_size),
                                         };
                                         let index = state.canvas.objects.len();
@@ -1538,7 +1538,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                                             pos: Pos2::new(100.0, 100.0),
                                             size: 100.0,
                                             color: Color32::WHITE,
-                                            rotation: 0.0,
+
                                         };
                                         let index = state.canvas.objects.len();
                                         state.history.save_add_object(
@@ -1557,7 +1557,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                                             pos: Pos2::new(100.0, 100.0),
                                             size: 100.0,
                                             color: Color32::WHITE,
-                                            rotation: 0.0,
+
                                         };
                                         let index = state.canvas.objects.len();
                                         state.history.save_add_object(
@@ -1576,7 +1576,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                                             pos: Pos2::new(100.0, 100.0),
                                             size: 100.0,
                                             color: Color32::WHITE,
-                                            rotation: 0.0,
+
                                         };
                                         let index = state.canvas.objects.len();
                                         state.history.save_add_object(
@@ -1594,7 +1594,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                                             pos: Pos2::new(100.0, 100.0),
                                             size: 100.0,
                                             color: Color32::WHITE,
-                                            rotation: 0.0,
+
                                         };
                                         let index = state.canvas.objects.len();
                                         state.history.save_add_object(
@@ -1613,7 +1613,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                                             pos: Pos2::new(100.0, 100.0),
                                             size: 100.0,
                                             color: Color32::WHITE,
-                                            rotation: 0.0,
+
                                         };
                                         let index = state.canvas.objects.len();
                                         state.history.save_add_object(
@@ -2066,7 +2066,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                             width: current_widths.clone().into(),
                                             color: stroke.color,
                                             base_width: stroke.base_width,
-                                            rot: 0.0,
+                    
                                         });
                                     }
                                     current_points = vec![p2];
@@ -2080,7 +2080,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                     width: current_widths.into(),
                                     color: stroke.color,
                                     base_width: stroke.base_width,
-                                    rot: 0.0,
+            
                                 });
                             }
                         }
@@ -2173,7 +2173,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                             width: StrokeWidth::Fixed(state.brush_width),
                             color: state.brush_color,
                             base_width: state.brush_width,
-                            rot: 0.0,
+    
                         };
                         let index = state.canvas.objects.len();
                         state
