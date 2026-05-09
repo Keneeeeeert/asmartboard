@@ -64,17 +64,16 @@ pub fn brush_stroke_add_point(
                 let has_dynamic_mode =
                     state.dynamic_brush_width_mode != DynamicBrushWidthMode::Disabled;
                 active_stroke.points = straightened_points;
-                if let StrokeWidth::Dynamic(v) = &active_stroke.width {
-                    if !v.is_empty() {
-                        let first_width = v[0];
-                        let last_width = *v.last().unwrap();
-                        active_stroke.width =
-                            if active_stroke.points.len() == 1 && !has_dynamic_mode {
-                                StrokeWidth::Fixed(first_width)
-                            } else {
-                                StrokeWidth::Dynamic(vec![first_width, last_width])
-                            };
-                    }
+                if let StrokeWidth::Dynamic(v) = &active_stroke.width
+                    && !v.is_empty()
+                {
+                    let first_width = v[0];
+                    let last_width = *v.last().unwrap();
+                    active_stroke.width = if active_stroke.points.len() == 1 && !has_dynamic_mode {
+                        StrokeWidth::Fixed(first_width)
+                    } else {
+                        StrokeWidth::Dynamic(vec![first_width, last_width])
+                    };
                 }
             }
             active_stroke.last_movement_time = Instant::now();

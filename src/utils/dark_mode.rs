@@ -152,13 +152,12 @@ mod platform {
                     in_general = trimmed.eq_ignore_ascii_case("[General]");
                     continue;
                 }
-                if in_general {
-                    if let Some(val) = trimmed
+                if in_general
+                    && let Some(val) = trimmed
                         .strip_prefix("ColorScheme=")
                         .or_else(|| trimmed.strip_prefix("colorScheme="))
-                    {
-                        return Some(val.to_lowercase().contains("dark"));
-                    }
+                {
+                    return Some(val.to_lowercase().contains("dark"));
                 }
             }
             None
@@ -174,11 +173,9 @@ mod platform {
                     in_appearance = trimmed.eq_ignore_ascii_case("[Appearance]");
                     continue;
                 }
-                if in_appearance {
-                    if let Some(val) = trimmed.strip_prefix("color_scheme_path=") {
-                        // Path ends with e.g. "/darker.conf", "/DarkBreeze.conf"
-                        return Some(val.to_lowercase().contains("dark"));
-                    }
+                if in_appearance && let Some(val) = trimmed.strip_prefix("color_scheme_path=") {
+                    // Path ends with e.g. "/darker.conf", "/DarkBreeze.conf"
+                    return Some(val.to_lowercase().contains("dark"));
                 }
             }
             None

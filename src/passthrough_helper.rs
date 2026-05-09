@@ -219,10 +219,10 @@ impl App {
     }
 
     pub fn request_helper_repaint_if_needed(&self) {
-        if let Some(helper) = &self.helper_window {
-            if helper.egui_renderer.context().has_requested_repaint() {
-                helper.window.request_redraw();
-            }
+        if let Some(helper) = &self.helper_window
+            && helper.egui_renderer.context().has_requested_repaint()
+        {
+            helper.window.request_redraw();
         }
     }
 

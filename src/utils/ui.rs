@@ -53,13 +53,12 @@ pub fn apply_window_mode(state: &mut AppState, window: &Arc<Window>) {
         WindowMode::ExclusiveFullscreen => {
             // 全屏
             // 使用选中的视频模式
-            if let Some(selected_index) = state.selected_video_mode_index {
-                if selected_index < state.fullscreen_video_modes.len() {
-                    if let Some(mode) = state.fullscreen_video_modes.get(selected_index) {
-                        window.set_fullscreen(Some(Fullscreen::Exclusive(mode.clone())));
-                        return;
-                    }
-                }
+            if let Some(selected_index) = state.selected_video_mode_index
+                && selected_index < state.fullscreen_video_modes.len()
+                && let Some(mode) = state.fullscreen_video_modes.get(selected_index)
+            {
+                window.set_fullscreen(Some(Fullscreen::Exclusive(mode.clone())));
+                return;
             }
 
             // 回退到第一个可用的视频模式

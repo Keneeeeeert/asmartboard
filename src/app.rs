@@ -448,10 +448,10 @@ impl ApplicationHandler<()> for App {
 
         self.request_helper_repaint_if_needed();
 
-        if let Some(render_state) = self.render_state.as_ref() {
-            if render_state.egui_renderer.context().has_requested_repaint() {
-                self.window.as_ref().unwrap().request_redraw();
-            }
+        if let Some(render_state) = self.render_state.as_ref()
+            && render_state.egui_renderer.context().has_requested_repaint()
+        {
+            self.window.as_ref().unwrap().request_redraw();
         }
     }
 
@@ -662,35 +662,33 @@ impl ApplicationHandler<()> for App {
                             brush_stroke_end(&mut self.state, id);
                         }
                         CanvasTool::Select => {
-                            if let Some(pointer) = self.state.pointers.get(&id) {
-                                if let PointerInteraction::Selecting {
+                            if let Some(pointer) = self.state.pointers.get(&id)
+                                && let PointerInteraction::Selecting {
                                     drag_accumulated_delta,
                                     drag_original_transform,
                                     ..
                                 } = &pointer.interaction
+                            {
+                                if let Some(sel_idx) = self.state.selected_object_index
+                                    && *drag_accumulated_delta != Vec2::ZERO
                                 {
-                                    if let Some(sel_idx) = self.state.selected_object_index {
-                                        if *drag_accumulated_delta != Vec2::ZERO {
-                                            self.state.history.save_move_object(
-                                                sel_idx,
-                                                -*drag_accumulated_delta,
-                                                *drag_accumulated_delta,
-                                            );
-                                        }
-                                    }
-                                    if let Some(original) = drag_original_transform.clone() {
-                                        if let Some(sel_idx) = self.state.selected_object_index
-                                            && sel_idx < self.state.canvas.objects.len()
-                                        {
-                                            let new_transform =
-                                                self.state.canvas.objects[sel_idx].get_transform();
-                                            self.state.history.save_transform_object(
-                                                sel_idx,
-                                                original,
-                                                new_transform,
-                                            );
-                                        }
-                                    }
+                                    self.state.history.save_move_object(
+                                        sel_idx,
+                                        -*drag_accumulated_delta,
+                                        *drag_accumulated_delta,
+                                    );
+                                }
+                                if let Some(original) = drag_original_transform.clone()
+                                    && let Some(sel_idx) = self.state.selected_object_index
+                                    && sel_idx < self.state.canvas.objects.len()
+                                {
+                                    let new_transform =
+                                        self.state.canvas.objects[sel_idx].get_transform();
+                                    self.state.history.save_transform_object(
+                                        sel_idx,
+                                        original,
+                                        new_transform,
+                                    );
                                 }
                             }
                             self.state.pointers.remove(&id);
@@ -699,20 +697,19 @@ impl ApplicationHandler<()> for App {
                             self.state.pointers.remove(&id);
                         }
                         CanvasTool::Insert => {
-                            if let Some(pointer) = self.state.pointers.remove(&id) {
-                                if let PointerInteraction::ShapeInsert {
+                            if let Some(pointer) = self.state.pointers.remove(&id)
+                                && let PointerInteraction::ShapeInsert {
                                     start_pos,
                                     shape_type,
                                 } = pointer.interaction
-                                {
-                                    let end_pos = pointer.pos;
-                                    crate::utils::ui::create_shape_object(
-                                        &mut self.state,
-                                        shape_type,
-                                        start_pos,
-                                        end_pos,
-                                    );
-                                }
+                            {
+                                let end_pos = pointer.pos;
+                                crate::utils::ui::create_shape_object(
+                                    &mut self.state,
+                                    shape_type,
+                                    start_pos,
+                                    end_pos,
+                                );
                             }
                         }
                         _ => {}

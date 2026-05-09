@@ -146,11 +146,9 @@ fn collapsing(ui: &mut Ui, section_id: &str, label: &str, add_body: impl FnOnce(
         }
         ui.ctx()
             .data_mut(|d| d.insert_persisted(egui::Id::new(ACTIVE_KEY), section_value));
-    } else if !now_open && was_open {
-        if active_value == section_value {
-            ui.ctx()
-                .data_mut(|d| d.insert_persisted(egui::Id::new(ACTIVE_KEY), u64::MAX));
-        }
+    } else if !now_open && was_open && active_value == section_value {
+        ui.ctx()
+            .data_mut(|d| d.insert_persisted(egui::Id::new(ACTIVE_KEY), u64::MAX));
     }
 }
 
@@ -247,14 +245,13 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
         if !state.is_overlay_mode {
             ui.horizontal(|ui| {
                 ui.my_label("画布转换:");
-                if ui.button("导出为图片").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
+                if ui.button("导出为图片").clicked()
+                    && let Some(path) = rfd::FileDialog::new()
                         .add_filter("画布文件", IMAGE_FILE_EXTS)
                         .set_file_name("canvas.bmp")
                         .save_file()
-                    {
-                        state.screenshot_path = Some(path);
-                    }
+                {
+                    state.screenshot_path = Some(path);
                 }
             });
         }
@@ -641,10 +638,10 @@ pub fn ui_toolbar_settings(state: &mut AppState, ctx: &Context, ui: &mut Ui, win
 
         ui.horizontal(|ui| {
             ui.my_label("立即保存设置:");
-            if ui.button("OK").clicked() {
-                if let Err(err) = state.persistent.save_to_file() {
-                    state.toasts.error(format!("设置保存失败: {}!", err));
-                }
+            if ui.button("OK").clicked()
+                && let Err(err) = state.persistent.save_to_file()
+            {
+                state.toasts.error(format!("设置保存失败: {}!", err));
             }
         });
 
@@ -1129,7 +1126,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                 ui.my_label("工具:");
                 // TODO: egui doesn't support rendering fonts with colors
                 let old_tool = state.current_tool;
-                if (state.is_overlay_mode
+                if ((state.is_overlay_mode
                     && ui
                         .selectable_value(&mut state.current_tool, CanvasTool::Passthrough, "穿透")
                         .changed())
@@ -1158,11 +1155,10 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                         .changed()
                     || ui
                         .selectable_value(&mut state.current_tool, CanvasTool::Settings, "设置")
-                        .changed()
+                        .changed())
+                    && state.current_tool != old_tool
                 {
-                    if state.current_tool != old_tool {
-                        clear_interaction_state(state);
-                    }
+                    clear_interaction_state(state);
                 }
             });
 
@@ -1196,60 +1192,55 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                                 state.toasts.success("对象已复制!");
                             }
                         }
-                        if ui.button("置顶").clicked() {
-                            if selected_idx < state.canvas.objects.len() - 1 {
-                                // Save state to history before modification
-                                let object = state.canvas.objects.remove(selected_idx);
-                                // Actually move the object to the top (end of the array)
-                                state.canvas.objects.push(object);
-                                state.history.save_add_object(
-                                    state.canvas.objects.len() - 1,
-                                    state.canvas.objects.last().unwrap().clone(),
-                                );
-                                state.selected_object_index = Some(state.canvas.objects.len() - 1);
-                                state.toasts.success("对象已移至顶部!");
-                            }
+                        if ui.button("置顶").clicked()
+                            && selected_idx < state.canvas.objects.len() - 1
+                        {
+                            // Save state to history before modification
+                            let object = state.canvas.objects.remove(selected_idx);
+                            // Actually move the object to the top (end of the array)
+                            state.canvas.objects.push(object);
+                            state.history.save_add_object(
+                                state.canvas.objects.len() - 1,
+                                state.canvas.objects.last().unwrap().clone(),
+                            );
+                            state.selected_object_index = Some(state.canvas.objects.len() - 1);
+                            state.toasts.success("对象已移至顶部!");
                         }
-                        if ui.button("置底").clicked() {
-                            if selected_idx > 0 {
-                                // Save state to history before modification
-                                let object = state.canvas.objects.remove(selected_idx);
-                                // Actually move the object to the bottom (beginning of the array)
-                                state.canvas.objects.insert(0, object);
-                                state.history.save_add_object(
-                                    0,
-                                    state.canvas.objects.first().unwrap().clone(),
-                                );
-                                state.selected_object_index = Some(0);
-                                state.toasts.success("对象已移至底部!");
-                            }
+                        if ui.button("置底").clicked() && selected_idx > 0 {
+                            // Save state to history before modification
+                            let object = state.canvas.objects.remove(selected_idx);
+                            // Actually move the object to the bottom (beginning of the array)
+                            state.canvas.objects.insert(0, object);
+                            state
+                                .history
+                                .save_add_object(0, state.canvas.objects.first().unwrap().clone());
+                            state.selected_object_index = Some(0);
+                            state.toasts.success("对象已移至底部!");
                         }
 
                         if let Some(CanvasObject::Text(text)) =
                             state.canvas.objects.get(selected_idx).cloned()
+                            && ui.button("栅格化").clicked()
                         {
-                            if ui.button("栅格化").clicked() {
-                                let strokes = utils::rasterize_text(&text, assets::font_bytes());
+                            let strokes = utils::rasterize_text(&text, assets::font_bytes());
 
-                                state.canvas.objects.remove(selected_idx);
+                            state.canvas.objects.remove(selected_idx);
 
-                                for stroke in strokes {
-                                    let stroke_obj = CanvasObject::Stroke(stroke);
-                                    state.canvas.objects.push(stroke_obj.clone());
-
-                                    state.history.save_add_object(
-                                        state.canvas.objects.len() - 1,
-                                        stroke_obj,
-                                    );
-                                }
+                            for stroke in strokes {
+                                let stroke_obj = CanvasObject::Stroke(stroke);
+                                state.canvas.objects.push(stroke_obj.clone());
 
                                 state
                                     .history
-                                    .save_remove_object(selected_idx, CanvasObject::Text(text));
-
-                                state.selected_object_index = None;
-                                state.toasts.success("已转换为笔画!");
+                                    .save_add_object(state.canvas.objects.len() - 1, stroke_obj);
                             }
+
+                            state
+                                .history
+                                .save_remove_object(selected_idx, CanvasObject::Text(text));
+
+                            state.selected_object_index = None;
+                            state.toasts.success("已转换为笔画!");
                         }
                     });
                 } else {
@@ -1268,26 +1259,25 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                             .map(|p| p.id)
                             .collect();
                         for id in drawing_ids {
-                            if let Some(pointer) = state.pointers.remove(&id) {
-                                if let PointerInteraction::Drawing { active_stroke } =
+                            if let Some(pointer) = state.pointers.remove(&id)
+                                && let PointerInteraction::Drawing { active_stroke } =
                                     pointer.interaction
+                            {
+                                if let StrokeWidth::Dynamic(v) = &active_stroke.width
+                                    && v.len() != active_stroke.points.len()
                                 {
-                                    if let StrokeWidth::Dynamic(v) = &active_stroke.width {
-                                        if v.len() != active_stroke.points.len() {
-                                            continue;
-                                        }
-                                    }
-                                    state
-                                        .canvas
-                                        .objects
-                                        .push(CanvasObject::Stroke(CanvasStroke {
-                                            points: active_stroke.points,
-                                            width: active_stroke.width,
-                                            color: old_color,
-                                            base_width: state.brush_width,
-                                            shape: None,
-                                        }));
+                                    continue;
                                 }
+                                state
+                                    .canvas
+                                    .objects
+                                    .push(CanvasObject::Stroke(CanvasStroke {
+                                        points: active_stroke.points,
+                                        width: active_stroke.width,
+                                        color: old_color,
+                                        base_width: state.brush_width,
+                                        shape: None,
+                                    }));
                             }
                         }
                     }
@@ -1619,10 +1609,10 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
         // TODO: unify with CanvasStroke::paint()
         for pointer in state.pointers.values() {
             if let PointerInteraction::Drawing { active_stroke } = &pointer.interaction {
-                if let StrokeWidth::Dynamic(v) = &active_stroke.width {
-                    if v.len() != active_stroke.points.len() {
-                        continue;
-                    }
+                if let StrokeWidth::Dynamic(v) = &active_stroke.width
+                    && v.len() != active_stroke.points.len()
+                {
+                    continue;
                 }
                 painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
                     active_stroke.points[0],
@@ -1823,19 +1813,15 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                             pointer.prev_pos = Some(pointer.pos);
                             pointer.pos = pos;
                         }
-                    } else if response.drag_stopped() {
-                        if let Some(pointer) = state.pointers.remove(&0) {
-                            if let PointerInteraction::ShapeInsert {
-                                start_pos,
-                                shape_type,
-                            } = pointer.interaction
-                            {
-                                let end_pos = pointer.pos;
-                                utils::ui::create_shape_object(
-                                    state, shape_type, start_pos, end_pos,
-                                );
-                            }
-                        }
+                    } else if response.drag_stopped()
+                        && let Some(pointer) = state.pointers.remove(&0)
+                        && let PointerInteraction::ShapeInsert {
+                            start_pos,
+                            shape_type,
+                        } = pointer.interaction
+                    {
+                        let end_pos = pointer.pos;
+                        utils::ui::create_shape_object(state, shape_type, start_pos, end_pos);
                     }
                 }
             }
@@ -1843,131 +1829,121 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
             CanvasTool::Select => {
                 if !has_touch {
                     // Handle click: iterate through objects from last to first, check bounding boxes
-                    if response.clicked() {
-                        if let Some(click_pos) = pointer_pos {
-                            let mut found_selection = false;
-                            for (i, object) in state.canvas.objects.iter().enumerate().rev() {
-                                if object.bounding_box().contains(click_pos) {
-                                    state.selected_object_index = Some(i);
-                                    found_selection = true;
-                                    break;
-                                }
+                    if response.clicked()
+                        && let Some(click_pos) = pointer_pos
+                    {
+                        let mut found_selection = false;
+                        for (i, object) in state.canvas.objects.iter().enumerate().rev() {
+                            if object.bounding_box().contains(click_pos) {
+                                state.selected_object_index = Some(i);
+                                found_selection = true;
+                                break;
                             }
-                            if !found_selection {
-                                state.selected_object_index = None;
-                            }
+                        }
+                        if !found_selection {
+                            state.selected_object_index = None;
                         }
                     }
 
                     // Handle drag start: create mouse pointer with Selecting interaction
-                    if response.drag_started() {
-                        if let Some(pos) = pointer_pos {
-                            let (dragged_handle, drag_original_transform) =
-                                if let Some(selected_idx) = state.selected_object_index
-                                    && selected_idx < state.canvas.objects.len()
-                                {
-                                    let object = &state.canvas.objects[selected_idx];
-                                    let bbox = object.bounding_box();
-                                    let handle = utils::get_transform_handle_at_pos(bbox, pos);
-                                    let transform =
-                                        handle.is_some().then(|| object.get_transform());
-                                    (handle, transform)
-                                } else {
-                                    (None, None)
-                                };
+                    if response.drag_started()
+                        && let Some(pos) = pointer_pos
+                    {
+                        let (dragged_handle, drag_original_transform) = if let Some(selected_idx) =
+                            state.selected_object_index
+                            && selected_idx < state.canvas.objects.len()
+                        {
+                            let object = &state.canvas.objects[selected_idx];
+                            let bbox = object.bounding_box();
+                            let handle = utils::get_transform_handle_at_pos(bbox, pos);
+                            let transform = handle.is_some().then(|| object.get_transform());
+                            (handle, transform)
+                        } else {
+                            (None, None)
+                        };
 
-                            state.pointers.insert(
-                                0,
-                                PointerState {
-                                    id: 0,
-                                    pos,
-                                    prev_pos: None,
-                                    interaction: PointerInteraction::Selecting {
-                                        drag_start: pos,
-                                        dragged_handle,
-                                        drag_original_transform,
-                                        drag_accumulated_delta: egui::Vec2::ZERO,
-                                    },
+                        state.pointers.insert(
+                            0,
+                            PointerState {
+                                id: 0,
+                                pos,
+                                prev_pos: None,
+                                interaction: PointerInteraction::Selecting {
+                                    drag_start: pos,
+                                    dragged_handle,
+                                    drag_original_transform,
+                                    drag_accumulated_delta: egui::Vec2::ZERO,
                                 },
-                            );
-                        }
+                            },
+                        );
                     }
 
                     // Handle dragging: move or resize the selected object
-                    if response.dragged() && state.selected_object_index.is_some() {
-                        if let Some(current_pos) = pointer_pos {
-                            if let Some(pointer) = state.pointers.get_mut(&0) {
-                                pointer.pos = current_pos;
-                                if let PointerInteraction::Selecting {
-                                    ref mut drag_start,
-                                    dragged_handle,
-                                    ref mut drag_accumulated_delta,
-                                    ..
-                                } = pointer.interaction
-                                {
-                                    let delta = current_pos - *drag_start;
+                    if response.dragged()
+                        && state.selected_object_index.is_some()
+                        && let Some(current_pos) = pointer_pos
+                        && let Some(pointer) = state.pointers.get_mut(&0)
+                    {
+                        pointer.pos = current_pos;
+                        if let PointerInteraction::Selecting {
+                            ref mut drag_start,
+                            dragged_handle,
+                            ref mut drag_accumulated_delta,
+                            ..
+                        } = pointer.interaction
+                        {
+                            let delta = current_pos - *drag_start;
 
-                                    if let Some(selected_idx) = state.selected_object_index
-                                        && selected_idx < state.canvas.objects.len()
+                            if let Some(selected_idx) = state.selected_object_index
+                                && selected_idx < state.canvas.objects.len()
+                            {
+                                if let Some(handle) = dragged_handle {
+                                    if let Some(object) = state.canvas.objects.get_mut(selected_idx)
                                     {
-                                        if let Some(handle) = dragged_handle {
-                                            if let Some(object) =
-                                                state.canvas.objects.get_mut(selected_idx)
-                                            {
-                                                object.transform(
-                                                    handle,
-                                                    delta,
-                                                    *drag_start,
-                                                    current_pos,
-                                                );
-                                            }
-                                        } else {
-                                            if let Some(object) =
-                                                state.canvas.objects.get_mut(selected_idx)
-                                            {
-                                                CanvasObject::move_object(object, delta);
-                                            }
-                                            *drag_accumulated_delta += delta;
-                                        }
+                                        object.transform(handle, delta, *drag_start, current_pos);
                                     }
-
-                                    *drag_start = current_pos;
+                                } else {
+                                    if let Some(object) = state.canvas.objects.get_mut(selected_idx)
+                                    {
+                                        CanvasObject::move_object(object, delta);
+                                    }
+                                    *drag_accumulated_delta += delta;
                                 }
                             }
+
+                            *drag_start = current_pos;
                         }
                     }
 
                     // Handle drag stop: save move/resize to history and clear state
                     if response.drag_stopped() {
-                        if let Some(pointer) = state.pointers.get(&0) {
-                            if let PointerInteraction::Selecting {
+                        if let Some(pointer) = state.pointers.get(&0)
+                            && let PointerInteraction::Selecting {
                                 drag_accumulated_delta,
                                 drag_original_transform,
                                 ..
                             } = &pointer.interaction
+                        {
+                            if let Some(selected_idx) = state.selected_object_index
+                                && *drag_accumulated_delta != egui::Vec2::ZERO
                             {
-                                if let Some(selected_idx) = state.selected_object_index {
-                                    if *drag_accumulated_delta != egui::Vec2::ZERO {
-                                        state.history.save_move_object(
-                                            selected_idx,
-                                            -*drag_accumulated_delta,
-                                            *drag_accumulated_delta,
-                                        );
-                                    }
-                                }
-                                if let Some(original) = drag_original_transform.clone() {
-                                    if let Some(selected_idx) = state.selected_object_index
-                                        && selected_idx < state.canvas.objects.len()
-                                    {
-                                        let new_transform =
-                                            state.canvas.objects[selected_idx].get_transform();
-                                        state.history.save_transform_object(
-                                            selected_idx,
-                                            original,
-                                            new_transform,
-                                        );
-                                    }
-                                }
+                                state.history.save_move_object(
+                                    selected_idx,
+                                    -*drag_accumulated_delta,
+                                    *drag_accumulated_delta,
+                                );
+                            }
+                            if let Some(original) = drag_original_transform.clone()
+                                && let Some(selected_idx) = state.selected_object_index
+                                && selected_idx < state.canvas.objects.len()
+                            {
+                                let new_transform =
+                                    state.canvas.objects[selected_idx].get_transform();
+                                state.history.save_transform_object(
+                                    selected_idx,
+                                    original,
+                                    new_transform,
+                                );
                             }
                         }
                         state.pointers.remove(&0);
@@ -2043,10 +2019,9 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     } else if response.dragged() {
                         if let Some(pointer) = state.pointers.get_mut(&0)
                             && matches!(pointer.interaction, PointerInteraction::Erasing)
+                            && let Some(pos) = pointer_pos
                         {
-                            if let Some(pos) = pointer_pos {
-                                pointer.pos = pos;
-                            }
+                            pointer.pos = pos;
                         }
                     } else {
                         state.pointers.remove(&0);

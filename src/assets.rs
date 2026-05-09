@@ -61,13 +61,11 @@ pub fn font_bytes() -> &'static [u8] {
                     weight: fontdb::Weight::NORMAL,
                     stretch: fontdb::Stretch::Normal,
                     style: fontdb::Style::Normal,
-                }) {
-                    if let Some(font_data) =
-                        font_db.with_face_data(face_id, |data, _| Some(data.to_vec()))
-                        && let Some(font_bytes) = font_data
-                    {
-                        return font_bytes;
-                    }
+                }) && let Some(font_data) =
+                    font_db.with_face_data(face_id, |data, _| Some(data.to_vec()))
+                    && let Some(font_bytes) = font_data
+                {
+                    return font_bytes;
                 }
             }
 
