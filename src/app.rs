@@ -520,16 +520,30 @@ impl ApplicationHandler<()> for App {
                 id,
                 ..
             }) => {
-                // Convert touch location to logical coordinates
+                // Convert touch location to logical coordinates (screen space)
                 let window = self.window.as_ref().unwrap();
                 let scale_factor = window.scale_factor() as f32;
-                let pos = Pos2::new(
+                let screen_pos = Pos2::new(
                     location.x as f32 / scale_factor,
                     location.y as f32 / scale_factor,
                 );
+                let pos = screen_pos + self.state.view_offset;
 
                 match phase {
                     TouchPhase::Started => match self.state.current_tool {
+                        CanvasTool::Pan => {
+                            self.state.pointers.insert(
+                                id,
+                                PointerState {
+                                    id,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::Panning {
+                                        last_pos: screen_pos,
+                                    },
+                                },
+                            );
+                        }
                         CanvasTool::Brush => {
                             brush_stroke_start(&mut self.state, id, pos);
                         }
@@ -606,6 +620,18 @@ impl ApplicationHandler<()> for App {
                         _ => {}
                     },
                     TouchPhase::Moved => match self.state.current_tool {
+                        CanvasTool::Pan => {
+                            if let Some(pointer) = self.state.pointers.get_mut(&id) {
+                                if let PointerInteraction::Panning { ref mut last_pos } =
+                                    pointer.interaction
+                                {
+                                    let delta = screen_pos - *last_pos;
+                                    self.state.view_offset -= delta;
+                                    *last_pos = screen_pos;
+                                }
+                                pointer.pos = pos;
+                            }
+                        }
                         CanvasTool::Brush => {
                             brush_stroke_add_point(&mut self.state, id, pos, false);
                         }
@@ -658,6 +684,9 @@ impl ApplicationHandler<()> for App {
                         _ => {}
                     },
                     TouchPhase::Ended | TouchPhase::Cancelled => match self.state.current_tool {
+                        CanvasTool::Pan => {
+                            self.state.pointers.remove(&id);
+                        }
                         CanvasTool::Brush => {
                             brush_stroke_end(&mut self.state, id);
                         }

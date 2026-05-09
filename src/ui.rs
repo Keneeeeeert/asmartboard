@@ -1134,6 +1134,9 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                         .selectable_value(&mut state.current_tool, CanvasTool::Select, "选择")
                         .changed()
                     || ui
+                        .selectable_value(&mut state.current_tool, CanvasTool::Pan, "视图")
+                        .changed()
+                    || ui
                         .selectable_value(&mut state.current_tool, CanvasTool::Brush, "画笔")
                         .changed()
                     || ui
@@ -1166,6 +1169,14 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
 
             if state.current_tool == CanvasTool::Passthrough {
                 ui.my_label(egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics());
+            } else if state.current_tool == CanvasTool::Pan {
+                ui.my_label(egui::RichText::new("(在画布上滑动以移动视图)").italics());
+                ui.horizontal(|ui| {
+                    ui.my_label("视图操作:");
+                    if ui.button("重置").clicked() {
+                        state.view_offset = Default::default();
+                    }
+                });
             } else if state.current_tool == CanvasTool::Select {
                 if let Some(selected_idx) = state.selected_object_index {
                     ui.horizontal(|ui| {
@@ -1180,17 +1191,13 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                             state.toasts.success("对象已删除!");
                         }
                         if ui.button("复制").clicked() {
-                            // FIXME: CanvasImage duplication not implemented
-                            if !matches!(state.canvas.objects[selected_idx], CanvasObject::Image(_))
-                            {
-                                let mut clone = state.canvas.objects[selected_idx].clone();
-                                CanvasObject::move_object(&mut clone, egui::vec2(20.0, 20.0));
-                                let index = state.canvas.objects.len();
-                                state.history.save_add_object(index, clone.clone());
-                                state.canvas.objects.push(clone);
-                                state.selected_object_index = Some(index);
-                                state.toasts.success("对象已复制!");
-                            }
+                            let mut clone = state.canvas.objects[selected_idx].clone();
+                            CanvasObject::move_object(&mut clone, egui::vec2(20.0, 20.0));
+                            let index = state.canvas.objects.len();
+                            state.history.save_add_object(index, clone.clone());
+                            state.canvas.objects.push(clone);
+                            state.selected_object_index = Some(index);
+                            state.toasts.success("对象已复制!");
                         }
                         if ui.button("置顶").clicked()
                             && selected_idx < state.canvas.objects.len() - 1
@@ -1510,7 +1517,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                         });
 
                         if state.selected_shape_type.is_some() {
-                            ui.my_label(egui::RichText::new("(拖拽画布以绘制形状)").italics());
+                            ui.my_label(egui::RichText::new("(在画布上滑动以绘制形状)").italics());
                         }
 
                         ui.checkbox(&mut state.continuous_insert, "连续插入");
@@ -1598,15 +1605,21 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
         );
 
         let painter = ui.painter();
+        let content_rect = ui.ctx().content_rect();
+        let view_offset = state.view_offset;
 
-        // 绘制所有对象
+        // 绘制所有对象 (带视图裁剪)
         for (i, object) in state.canvas.objects.iter().enumerate() {
             let selected = state.selected_object_index == Some(i);
-            object.paint(painter, selected);
+            // 对象包围盒完全在视图外则跳过
+            let obj_bbox = object.bounding_box();
+            let screen_bbox = obj_bbox.translate(-view_offset);
+            if screen_bbox.intersects(content_rect) {
+                object.paint(painter, selected, view_offset);
+            }
         }
 
         // 绘制当前正在绘制的笔画
-        // TODO: unify with CanvasStroke::paint()
         for pointer in state.pointers.values() {
             if let PointerInteraction::Drawing { active_stroke } = &pointer.interaction {
                 if let StrokeWidth::Dynamic(v) = &active_stroke.width
@@ -1614,24 +1627,48 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 {
                     continue;
                 }
+                let color = state.brush_color;
+                let offset_points: Vec<Pos2> = active_stroke
+                    .points
+                    .iter()
+                    .map(|p| *p - view_offset)
+                    .collect();
+
                 painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-                    active_stroke.points[0],
+                    offset_points[0],
                     active_stroke.width.first() / 2.0,
-                    state.brush_color,
+                    color,
                 )));
                 if active_stroke.points.len() >= 2 {
                     painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-                        active_stroke.points[active_stroke.points.len() - 1],
+                        offset_points[offset_points.len() - 1],
                         active_stroke.width.last() / 2.0,
-                        state.brush_color,
+                        color,
                     )));
-                    for i in 0..active_stroke.points.len() - 1 {
-                        let avg_width =
-                            (active_stroke.width.get(i) + active_stroke.width.get(i + 1)) / 2.0;
-                        painter.line_segment(
-                            [active_stroke.points[i], active_stroke.points[i + 1]],
-                            Stroke::new(avg_width, state.brush_color),
-                        );
+                    match &active_stroke.width {
+                        StrokeWidth::Fixed(w) => {
+                            if active_stroke.points.len() == 2 {
+                                painter.line_segment(
+                                    [offset_points[0], offset_points[1]],
+                                    Stroke::new(*w, color),
+                                );
+                            } else {
+                                let path = egui::epaint::PathShape::line(
+                                    offset_points.clone(),
+                                    Stroke::new(*w, color),
+                                );
+                                painter.add(egui::Shape::Path(path));
+                            }
+                        }
+                        StrokeWidth::Dynamic(widths) => {
+                            for i in 0..offset_points.len() - 1 {
+                                let avg_width = (widths[i] + widths[i + 1]) / 2.0;
+                                painter.line_segment(
+                                    [offset_points[i], offset_points[i + 1]],
+                                    Stroke::new(avg_width, color),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -1644,20 +1681,18 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 shape_type,
             } = &pointer.interaction
             {
-                let end_pos = pointer.pos;
+                let sp = *start_pos - view_offset;
+                let ep = pointer.pos - view_offset;
                 match shape_type {
                     CanvasShapeType::Line => {
-                        painter.line_segment(
-                            [*start_pos, end_pos],
-                            Stroke::new(3.0_f32, Color32::WHITE),
-                        );
-                        painter.circle_filled(*start_pos, 1.5_f32, Color32::WHITE);
-                        painter.circle_filled(end_pos, 1.5_f32, Color32::WHITE);
+                        painter.line_segment([sp, ep], Stroke::new(3.0_f32, Color32::WHITE));
+                        painter.circle_filled(sp, 1.5_f32, Color32::WHITE);
+                        painter.circle_filled(ep, 1.5_f32, Color32::WHITE);
                     }
                     CanvasShapeType::Arrow => {
-                        let len = start_pos.distance(end_pos);
+                        let len = sp.distance(ep);
                         if len > 1.0 {
-                            let dir = (end_pos - *start_pos) / len;
+                            let dir = (ep - sp) / len;
                             let arrow_size = (len * 0.15).max(10.0);
                             let angle = 30.0_f32.to_radians();
                             let cos = angle.cos();
@@ -1666,22 +1701,19 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                 egui::vec2(dir.x * cos - dir.y * sin, dir.x * sin + dir.y * cos);
                             let right_dir =
                                 egui::vec2(dir.x * cos + dir.y * sin, -dir.x * sin + dir.y * cos);
+                            painter.line_segment([sp, ep], Stroke::new(3.0_f32, Color32::WHITE));
                             painter.line_segment(
-                                [*start_pos, end_pos],
+                                [ep, ep - left_dir * arrow_size],
                                 Stroke::new(3.0_f32, Color32::WHITE),
                             );
                             painter.line_segment(
-                                [end_pos, end_pos - left_dir * arrow_size],
-                                Stroke::new(3.0_f32, Color32::WHITE),
-                            );
-                            painter.line_segment(
-                                [end_pos, end_pos - right_dir * arrow_size],
+                                [ep, ep - right_dir * arrow_size],
                                 Stroke::new(3.0_f32, Color32::WHITE),
                             );
                         }
                     }
                     CanvasShapeType::Rectangle => {
-                        let rect = Rect::from_two_pos(*start_pos, end_pos);
+                        let rect = Rect::from_two_pos(sp, ep);
                         painter.rect_stroke(
                             rect,
                             0.0,
@@ -1690,7 +1722,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                         );
                     }
                     CanvasShapeType::Triangle => {
-                        let rect = Rect::from_two_pos(*start_pos, end_pos);
+                        let rect = Rect::from_two_pos(sp, ep);
                         let size = rect.width().max(rect.height());
                         let top_left = rect.min;
                         let p1 = top_left + egui::vec2(size / 2.0, 0.0);
@@ -1703,8 +1735,8 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                         ));
                     }
                     CanvasShapeType::Circle => {
-                        let center = *start_pos + (end_pos - *start_pos) / 2.0;
-                        let radius = start_pos.distance(end_pos) / 2.0;
+                        let center = sp + (ep - sp) / 2.0;
+                        let radius = sp.distance(ep) / 2.0;
                         painter.circle_stroke(center, radius, Stroke::new(3.0_f32, Color32::WHITE));
                     }
                 }
@@ -1732,7 +1764,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 if pointer.id == 0 {
                     continue;
                 }
-                let pos = pointer.pos;
+                let pos = pointer.pos - view_offset;
                 painter.circle_filled(
                     pos,
                     15.0,
@@ -1775,9 +1807,50 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
         } else {
             response.interact_pointer_pos()
         };
+        // 屏幕坐标 -> 画布坐标
+        let canvas_pos = pointer_pos.map(|p| p + view_offset);
 
         match state.current_tool {
             CanvasTool::Settings | CanvasTool::Passthrough => {}
+
+            CanvasTool::Pan => {
+                if !has_touch {
+                    if response.drag_started() {
+                        if let Some(screen_pos) = pointer_pos
+                            && let Some(pos) = canvas_pos
+                        {
+                            state.pointers.insert(
+                                0,
+                                PointerState {
+                                    id: 0,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::Panning {
+                                        last_pos: screen_pos,
+                                    },
+                                },
+                            );
+                        }
+                    } else if response.dragged() {
+                        if let Some(pointer) = state.pointers.get_mut(&0)
+                            && matches!(pointer.interaction, PointerInteraction::Panning { .. })
+                            && let Some(screen_pos) = pointer_pos
+                            && let Some(pos) = canvas_pos
+                        {
+                            if let PointerInteraction::Panning { ref mut last_pos } =
+                                pointer.interaction
+                            {
+                                let delta = screen_pos - *last_pos;
+                                state.view_offset -= delta;
+                                *last_pos = screen_pos;
+                            }
+                            pointer.pos = pos;
+                        }
+                    } else if response.drag_stopped() {
+                        state.pointers.remove(&0);
+                    }
+                }
+            }
 
             CanvasTool::Insert => {
                 if state.current_insert_tab == InsertTab::Shape
@@ -1785,11 +1858,12 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     && !has_touch
                 {
                     if response.drag_started() {
-                        if let Some(pos) = pointer_pos
-                            && pos.x >= rect.min.x
-                            && pos.x <= rect.max.x
-                            && pos.y >= rect.min.y
-                            && pos.y <= rect.max.y
+                        if let Some(pos) = canvas_pos
+                            && let Some(screen_pos) = pointer_pos
+                            && screen_pos.x >= rect.min.x
+                            && screen_pos.x <= rect.max.x
+                            && screen_pos.y >= rect.min.y
+                            && screen_pos.y <= rect.max.y
                             && let Some(shape_type) = state.selected_shape_type
                         {
                             state.pointers.insert(
@@ -1808,7 +1882,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     } else if response.dragged() {
                         if let Some(pointer) = state.pointers.get_mut(&0)
                             && matches!(pointer.interaction, PointerInteraction::ShapeInsert { .. })
-                            && let Some(pos) = pointer_pos
+                            && let Some(pos) = canvas_pos
                         {
                             pointer.prev_pos = Some(pointer.pos);
                             pointer.pos = pos;
@@ -1830,7 +1904,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 if !has_touch {
                     // Handle click: iterate through objects from last to first, check bounding boxes
                     if response.clicked()
-                        && let Some(click_pos) = pointer_pos
+                        && let Some(click_pos) = canvas_pos
                     {
                         let mut found_selection = false;
                         for (i, object) in state.canvas.objects.iter().enumerate().rev() {
@@ -1847,7 +1921,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 
                     // Handle drag start: create mouse pointer with Selecting interaction
                     if response.drag_started()
-                        && let Some(pos) = pointer_pos
+                        && let Some(pos) = canvas_pos
                     {
                         let (dragged_handle, drag_original_transform) = if let Some(selected_idx) =
                             state.selected_object_index
@@ -1881,7 +1955,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     // Handle dragging: move or resize the selected object
                     if response.dragged()
                         && state.selected_object_index.is_some()
-                        && let Some(current_pos) = pointer_pos
+                        && let Some(current_pos) = canvas_pos
                         && let Some(pointer) = state.pointers.get_mut(&0)
                     {
                         pointer.pos = current_pos;
@@ -1960,13 +2034,13 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                         .map(|p| p.pos)
                         .collect()
                 } else if response.drag_started() || response.clicked() || response.dragged() {
-                    pointer_pos.into_iter().collect()
+                    canvas_pos.into_iter().collect()
                 } else {
                     vec![]
                 };
 
                 for pos in eraser_positions {
-                    utils::draw_size_preview(painter, pos, state.eraser_size);
+                    utils::draw_size_preview(painter, pos - view_offset, state.eraser_size);
 
                     let mut to_remove = Vec::new();
                     for (i, object) in state.canvas.objects.iter().enumerate().rev() {
@@ -2005,7 +2079,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
             CanvasTool::PixelEraser => {
                 if !has_touch {
                     if response.drag_started() || response.clicked() {
-                        if let Some(pos) = pointer_pos {
+                        if let Some(pos) = canvas_pos {
                             state.pointers.insert(
                                 0,
                                 PointerState {
@@ -2019,7 +2093,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     } else if response.dragged() {
                         if let Some(pointer) = state.pointers.get_mut(&0)
                             && matches!(pointer.interaction, PointerInteraction::Erasing)
-                            && let Some(pos) = pointer_pos
+                            && let Some(pos) = canvas_pos
                         {
                             pointer.pos = pos;
                         }
@@ -2052,7 +2126,11 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 
                 for pointer in state.pointers.values() {
                     if matches!(pointer.interaction, PointerInteraction::Erasing) {
-                        utils::draw_size_preview(painter, pointer.pos, state.eraser_size);
+                        utils::draw_size_preview(
+                            painter,
+                            pointer.pos - view_offset,
+                            state.eraser_size,
+                        );
                     }
                 }
 
@@ -2211,16 +2289,17 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
 
                 // 画笔工具
                 if response.drag_started() {
-                    if let Some(pos) = pointer_pos
-                        && pos.x >= rect.min.x
-                        && pos.x <= rect.max.x
-                        && pos.y >= rect.min.y
-                        && pos.y <= rect.max.y
+                    if let Some(screen_pos) = pointer_pos
+                        && screen_pos.x >= rect.min.x
+                        && screen_pos.x <= rect.max.x
+                        && screen_pos.y >= rect.min.y
+                        && screen_pos.y <= rect.max.y
+                        && let Some(pos) = canvas_pos
                     {
                         brush_stroke_start(state, 0, pos);
                     }
                 } else if response.dragged() {
-                    if is_drawing && let Some(pos) = pointer_pos {
+                    if is_drawing && let Some(pos) = canvas_pos {
                         brush_stroke_add_point(state, 0, pos, false);
                     }
                 } else if response.drag_stopped() {
@@ -2229,11 +2308,12 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                     }
                 } else if response.clicked() {
                     // 处理单击事件 - 绘制单个点
-                    if let Some(pos) = pointer_pos
-                        && pos.x >= rect.min.x
-                        && pos.x <= rect.max.x
-                        && pos.y >= rect.min.y
-                        && pos.y <= rect.max.y
+                    if let Some(screen_pos) = pointer_pos
+                        && screen_pos.x >= rect.min.x
+                        && screen_pos.x <= rect.max.x
+                        && screen_pos.y >= rect.min.y
+                        && screen_pos.y <= rect.max.y
+                        && let Some(pos) = canvas_pos
                     {
                         let new_stroke = CanvasStroke {
                             points: vec![pos],
@@ -2253,7 +2333,7 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                 // 如果鼠标在画布内移动且正在绘制，也添加点（用于平滑绘制）
                 if response.hovered()
                     && is_drawing
-                    && let Some(pos) = pointer_pos
+                    && let Some(pos) = canvas_pos
                 {
                     brush_stroke_add_point(state, 0, pos, true);
                 }
