@@ -1,19 +1,28 @@
 use crate::assets::ICON;
+use crate::passthrough_helper::PassthroughHelper;
 use crate::render::RenderState;
+use crate::UserEvent;
 #[cfg(feature = "startup_animation")]
 use crate::state::StartupAnimation;
-use crate::state::{AppState, CanvasObject, CanvasTool};
+use crate::state::{
+    AppState, CanvasObject, CanvasObjectOps, CanvasTool, InsertTab, PointerInteraction,
+    PointerState,
+};
+use crate::ui;
+use crate::utils;
 use crate::utils::stroke::{brush_stroke_add_point, brush_stroke_end, brush_stroke_start};
 use crate::utils::ui::{apply_theme_mode_and_canvas_color, apply_window_mode};
-use crate::{UserEvent, ui};
 use core::f32;
-use egui::Pos2;
+use egui::{Pos2, Vec2};
 use egui_wgpu::{ScreenDescriptor, wgpu};
 use image::GenericImageView;
 use std::sync::Arc;
+use wgpu::{
+    BackendOptions, CurrentSurfaceTexture, InstanceDescriptor, TexelCopyBufferInfo,
+    TexelCopyBufferLayout,
+};
 use tray_icon::TrayIconBuilder;
-use wgpu::TexelCopyTextureInfo;
-use wgpu::{CurrentSurfaceTexture, InstanceDescriptor, TexelCopyBufferInfo, TexelCopyBufferLayout};
+use wgpu::{InstanceFlags, TexelCopyTextureInfo};
 use winit::application::ApplicationHandler;
 use winit::event::{KeyEvent, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -24,25 +33,29 @@ use winit::window::{Window, WindowId};
 pub enum FileDialogAction {
     Save,
     Load,
-    Export,
 }
 
 pub struct App {
-    gpu_instance: wgpu::Instance,
-    render_state: Option<RenderState>,
-    window: Option<Arc<Window>>,
-    state: AppState,
+    pub gpu_instance: wgpu::Instance,
+    pub render_state: Option<RenderState>,
+    pub window: Option<Arc<Window>>,
+    pub state: AppState,
+    pub helper_window: Option<PassthroughHelper>,
     modifiers: winit::keyboard::ModifiersState,
 }
 
 impl App {
     pub fn new() -> Self {
         let mut state = AppState::default();
-        let gpu_instance = egui_wgpu::wgpu::Instance::new(InstanceDescriptor {
+        let gpu_instance = wgpu::Instance::new(InstanceDescriptor {
             backends: state.persistent.graphics_api.to_backends(),
-            flags: Default::default(),
+            flags: InstanceFlags::empty(),
             memory_budget_thresholds: Default::default(),
-            backend_options: Default::default(),
+            backend_options: {
+                let mut options = BackendOptions::default();
+                options.dx12.presentation_system = wgpu::Dx12SwapchainKind::DxgiFromVisual;
+                options
+            },
             display: None,
         });
 
@@ -64,24 +77,36 @@ impl App {
             render_state: None,
             window: None,
             state,
+            helper_window: None,
             modifiers: winit::keyboard::ModifiersState::default(),
         }
     }
 
-    pub async fn set_window(&mut self, window: Window) {
-        let window = Arc::new(window);
-
+    pub async fn create_window(&mut self, event_loop: &ActiveEventLoop) {
+        // icon
         let icon = image::load_from_memory(ICON).expect("invalid icon data");
-
         let rgba = icon.to_rgba8().to_vec();
         let (width, height) = icon.dimensions();
+        let winit_icon =
+            Some(winit::window::Icon::from_rgba(rgba.clone(), width, height).expect("invalid icon data"));
 
-        // 设置标题
-        window.set_title("erh_smartboard");
-        let winit_icon = Some(
-            winit::window::Icon::from_rgba(rgba.clone(), width, height).expect("invalid icon data"),
+        let window = Arc::new(
+            event_loop
+                .create_window(
+                    Window::default_attributes()
+                        .with_title("erh_smartboard")
+                        .with_transparent(true)
+                        .with_window_icon({
+                            #[cfg(target_os = "windows")]
+                            {
+                                winit_icon.clone()
+                            }
+                            #[cfg(not(target_os = "windows"))]
+                            winit_icon
+                        }),
+                )
+                .unwrap(),
         );
-        window.set_window_icon(winit_icon.clone());
 
         #[cfg(target_os = "windows")]
         {
@@ -89,21 +114,20 @@ impl App {
             window.set_taskbar_icon(winit_icon);
         }
 
-        // 获取显示模式
+        // prepare exclusive fullscreen video modes
         let monitor = window
             .current_monitor()
-            .or_else(|| window.primary_monitor());
+            .or_else(|| window.primary_monitor())
+            .or_else(|| window.available_monitors().next());
         if let Some(monitor) = monitor {
             self.state.fullscreen_video_modes = monitor.video_modes().collect();
         } else {
             eprintln!(
-                "
-error: failed to get monitor
-       this is expected behaviour on wayland & web, do not switch to exclusive fullscreen mode"
+                "warning: failed to get monitor, exclusive fullscreen mode will be unavailable"
             )
         }
 
-        // 设置窗口模式
+        // window mode
         apply_window_mode(&mut self.state, &window);
 
         // 创建托盘图标
@@ -115,7 +139,21 @@ error: failed to get monitor
         let _ = tray.set_visible(false);
         self.state.tray = Some(tray);
 
-        // 获取窗口尺寸
+        #[cfg(target_os = "windows")]
+        unsafe {
+            if let Err(err) = utils::windows::enable_premultiplied_alpha(
+                utils::windows::winit_window_to_hwnd(&window).unwrap(),
+            ) {
+                eprintln!(
+                    "
+error: failed to enable premultiplied alpha for window: {:?}
+       passthrough mode might not work or app might crash",
+                    err
+                );
+            }
+        };
+
+        // prepare renderer
         let size = window.inner_size();
         let initial_width = size.width;
         let initial_height = size.height;
@@ -140,12 +178,15 @@ error: failed to get monitor
 
         let ctx = state.egui_renderer.context();
 
-        // 设置主题模式
+        // colors
         apply_theme_mode_and_canvas_color(
             ctx,
             self.state.persistent.theme_mode,
             self.state.persistent.canvas_color,
         );
+
+        // first draw
+        window.request_redraw();
 
         self.window.get_or_insert(window);
         self.render_state.get_or_insert(state);
@@ -155,21 +196,27 @@ error: failed to get monitor
         if let Err(err) = self.state.persistent.save_to_file() {
             eprintln!("failed to save settings: {}", err);
         }
-        self.state.tray.take(); // closes tray
         event_loop.exit();
     }
 
     fn handle_resized(&mut self, width: u32, height: u32) {
-        if width > 0 && height > 0 {
-            self.render_state
-                .as_mut()
-                .unwrap()
-                .resize_surface(width, height);
-        }
+        self.render_state
+            .as_mut()
+            .unwrap()
+            .resize_surface(width, height);
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn handle_redraw(&mut self) {
+        #[cfg(feature = "profiling")]
+        profiling::scope!("handle_redraw::setup");
+
         let render_state = self.render_state.as_mut().unwrap();
+
+        if self.state.present_mode_changed {
+            render_state.set_present_mode(self.state.persistent.present_mode);
+            self.state.present_mode_changed = false;
+        }
 
         let screen_descriptor = ScreenDescriptor {
             size_in_pixels: [
@@ -184,20 +231,12 @@ error: failed to get monitor
 
         let surface_texture = match surface_texture {
             CurrentSurfaceTexture::Success(surface) => surface,
-            CurrentSurfaceTexture::Lost => {
-                println!("wgpu surface lost");
-                return;
-            }
-            CurrentSurfaceTexture::Outdated => {
-                println!("wgpu surface outdated");
-                return;
-            }
-            CurrentSurfaceTexture::Timeout => {
-                println!("wgpu surface timeout");
-                return;
+            CurrentSurfaceTexture::Suboptimal(surface) => {
+                println!("warning: wgpu surface suboptimal");
+                surface
             }
             val => {
-                println!("{:?}", val);
+                println!("warning: wgpu surface {:?}", val);
                 return;
             }
         };
@@ -214,52 +253,71 @@ error: failed to get monitor
 
         render_state.egui_renderer.begin_frame(window);
 
-        let ctx = &(render_state.egui_renderer.context().clone());
-
-        #[cfg(feature = "startup_animation")]
-        if let Some(anim) = &mut self.state.startup_animation {
-            if !anim.is_finished() {
-                anim.update(ctx);
-                anim.draw_fullscreen(ctx);
-                ctx.request_repaint(); // ensure smooth playback
-            }
-        }
-
-        self.state.toasts.show(ctx);
-
         // access this value in next redraw before ui to ensure that all ui has become invisible
         let screenshot_path = self.state.screenshot_path.clone();
 
+        // fixes a borrow checker error
+        let ctx = &(render_state.egui_renderer.context().clone());
+
         // --- ui ---
+        {
+            #[cfg(feature = "profiling")]
+            profiling::scope!("handle_redraw::ui");
 
-        if self.state.show_welcome_window {
-            ui::ui_welcome(&mut self.state, ctx);
-        }
+            #[cfg(feature = "startup_animation")]
+            if let Some(anim) = &mut self.state.startup_animation {
+                if !anim.is_finished() {
+                    anim.update(ctx);
+                    anim.draw_fullscreen(ctx);
+                    ctx.request_repaint(); // ensure smooth playback
+                }
+            }
 
-        ui::ui_toolbar(&mut self.state, ctx, window);
+            self.state.toasts.show(ctx);
 
-        ui::ui_pages_nav(&mut self.state, ctx);
+            #[cfg(feature = "profiling")]
+            puffin_egui::profiler_window(ctx);
 
-        if self.state.show_page_management_window {
-            ui::ui_pages_manager(&mut self.state, ctx);
-        }
+            if self.state.current_tool != CanvasTool::Passthrough
+                && self.state.screenshot_path.is_none()
+            {
+                if self.state.show_welcome_window {
+                    ui::ui_welcome(&mut self.state, ctx);
+                }
 
-        ui::ui_canvas(&mut self.state, ctx);
+                ui::ui_toolbar(&mut self.state, ctx, window);
 
+                ui::ui_pages_nav(&mut self.state, ctx);
+
+                if self.state.show_page_management_window {
+                    ui::ui_pages_manager(&mut self.state, ctx);
+                }
+            }
+
+            ui::ui_canvas(&mut self.state, ctx);
+        };
         // --- end ui
 
         // egui render pass
-        render_state.egui_renderer.end_frame_and_draw(
-            &render_state.device,
-            &render_state.queue,
-            &mut encoder,
-            window,
-            &surface_view,
-            screen_descriptor,
-        );
+        {
+            #[cfg(feature = "profiling")]
+            profiling::scope!("handle_redraw::render_pass");
+
+            render_state.egui_renderer.end_frame_and_draw(
+                &render_state.device,
+                &render_state.queue,
+                &mut encoder,
+                window,
+                &surface_view,
+                screen_descriptor,
+            );
+        }
 
         // submit & present texture
         if let Some(path) = screenshot_path {
+            #[cfg(feature = "profiling")]
+            profiling::scope!("handle_redraw::screenshot");
+
             let width = render_state.surface_config.width;
             let height = render_state.surface_config.height;
 
@@ -356,35 +414,48 @@ error: failed to get monitor
             render_state.queue.submit(Some(encoder.finish()));
         }
 
+        {
+            #[cfg(feature = "profiling")]
+            profiling::scope!("handle_redraw::gc");
+
+            self.state.canvas.objects.retain(|obj| {
+                if let CanvasObject::Image(img) = obj {
+                    !img.marked_for_deletion
+                } else {
+                    true
+                }
+            });
+        }
+
         surface_texture.present();
 
-        self.state.canvas.objects.retain(|obj| {
-            if let CanvasObject::Image(img) = obj {
-                !img.marked_for_deletion
-            } else {
-                true
-            }
-        });
+        // update window passthrough state once if disabled
+        if self.state.overlay_mode_changed && !self.state.is_overlay_mode {
+            let _ = window.set_cursor_hittest(true);
+            self.state.overlay_mode_changed = false;
+        }
 
-        if self.state.present_mode_changed {
-            render_state.set_present_mode(self.state.persistent.present_mode);
-            self.state.present_mode_changed = false;
+        // update window passthrough state every frame if enabled
+        if self.state.is_overlay_mode {
+            if self.state.current_tool == CanvasTool::Passthrough {
+                let _ = window.set_cursor_hittest(false);
+            } else {
+                let _ = window.set_cursor_hittest(true);
+            }
         }
 
         if self.state.persistent.show_fps {
             _ = self.state.fps_counter.update();
         }
+
+        #[cfg(feature = "profiling")]
+        profiling::finish_frame!();
     }
 }
 
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window = event_loop
-            .create_window(Window::default_attributes())
-            .unwrap();
-        pollster::block_on(self.set_window(window));
-        // redraw on window creation
-        self.window.as_ref().unwrap().request_redraw();
+        pollster::block_on(self.create_window(event_loop));
     }
 
     // redraw if egui requests repaint
@@ -393,10 +464,12 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
 
-        if let Some(render_state) = self.render_state.as_ref() {
-            if render_state.egui_renderer.context().has_requested_repaint() {
-                self.window.as_ref().unwrap().request_redraw();
-            }
+        self.request_helper_repaint_if_needed();
+
+        if let Some(render_state) = self.render_state.as_ref()
+            && render_state.egui_renderer.context().has_requested_repaint()
+        {
+            self.window.as_ref().unwrap().request_redraw();
         }
     }
 
@@ -459,22 +532,24 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UserEvent::FileDialogResult {
-                path: Some(path),
-                action: FileDialogAction::Export,
-                ..
-            } => {
-                self.state.screenshot_path = Some(path);
-                self.window.as_ref().unwrap().request_redraw();
-            }
             UserEvent::FileDialogResult { .. } => {
                 // user cancelled
             }
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        // 检查是否需要退出
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        // Dispatch to helper window if this event is for it
+        if self.is_event_for_helper(window_id) {
+            self.handle_helper_window_event(event_loop, event);
+            return;
+        }
+
         if self.state.should_quit {
             println!("quit button was pressed; exiting");
             self.exit(event_loop);
@@ -522,13 +597,13 @@ impl ApplicationHandler<UserEvent> for App {
                     match logical_key {
                         Key::Named(NamedKey::Escape) => self.exit(event_loop),
                         Key::Named(NamedKey::Delete) => {
-                            if let Some(idx) = self.state.selected_object_index {
-                                if idx < self.state.canvas.objects.len() {
-                                    let obj = self.state.canvas.objects.remove(idx);
-                                    self.state.history.save_remove_object(idx, obj);
-                                    self.state.selected_object_index = None;
-                                    self.window.as_ref().unwrap().request_redraw();
-                                }
+                            if let Some(idx) = self.state.selected_object_index
+                                && idx < self.state.canvas.objects.len()
+                            {
+                                let obj = self.state.canvas.objects.remove(idx);
+                                self.state.history.save_remove_object(idx, obj);
+                                self.state.selected_object_index = None;
+                                self.window.as_ref().unwrap().request_redraw();
                             }
                         }
                         Key::Character(ref ch) => {
@@ -579,10 +654,10 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::RedrawRequested => {
                 self.handle_redraw();
+                self.manage_passthrough_helper(event_loop);
             }
-            WindowEvent::Resized(new_size) => {
+            WindowEvent::Resized(new_size) if new_size.width > 0 && new_size.height > 0 => {
                 self.handle_resized(new_size.width, new_size.height);
-                // Update UI reactively
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::Touch(Touch {
@@ -591,47 +666,238 @@ impl ApplicationHandler<UserEvent> for App {
                 id,
                 ..
             }) => {
-                self.state.using_touch = true;
-
-                // Convert touch location to logical coordinates
+                // Convert touch location to logical coordinates (screen space)
                 let window = self.window.as_ref().unwrap();
                 let scale_factor = window.scale_factor() as f32;
-                let logical_pos = Pos2::new(
+                let screen_pos = Pos2::new(
                     location.x as f32 / scale_factor,
                     location.y as f32 / scale_factor,
                 );
+                let pos = screen_pos + self.state.view_offset;
 
-                // Store touch point in state for rendering
                 match phase {
-                    TouchPhase::Started => {
-                        self.state.touch_points.insert(id, logical_pos);
-
-                        // 如果当前工具是画笔，开始新的笔画
-                        if self.state.current_tool == CanvasTool::Brush {
-                            self.state.is_drawing = true;
-                            brush_stroke_start(&mut self.state, id, logical_pos);
+                    TouchPhase::Started => match self.state.current_tool {
+                        CanvasTool::Pan => {
+                            self.state.pointers.insert(
+                                id,
+                                PointerState {
+                                    id,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::Panning {
+                                        last_pos: screen_pos,
+                                    },
+                                },
+                            );
                         }
-                    }
-                    TouchPhase::Moved => {
-                        self.state.touch_points.insert(id, logical_pos);
-
-                        // 如果当前工具是画笔，继续绘制
-                        if self.state.current_tool == CanvasTool::Brush {
-                            brush_stroke_add_point(&mut self.state, id, logical_pos, false);
+                        CanvasTool::Brush => {
+                            brush_stroke_start(&mut self.state, id, pos);
                         }
-                    }
-                    TouchPhase::Ended | TouchPhase::Cancelled => {
-                        self.state.using_touch = false;
+                        CanvasTool::Select
+                            if !self.state.pointers.values().any(|p| {
+                                matches!(p.interaction, PointerInteraction::Selecting { .. })
+                            }) =>
+                        {
+                            // Hit-test objects (last to first for z-order)
+                            for (i, object) in self.state.canvas.objects.iter().enumerate().rev() {
+                                if object.bounding_box().contains(pos) {
+                                    self.state.selected_object_index = Some(i);
+                                    break;
+                                }
+                            }
 
-                        self.state.touch_points.remove(&id);
+                            let (dragged_handle, drag_original_transform) = if let Some(idx) =
+                                self.state.selected_object_index
+                                && idx < self.state.canvas.objects.len()
+                            {
+                                let object = &self.state.canvas.objects[idx];
+                                let bbox = object.bounding_box();
+                                let handle = utils::get_transform_handle_at_pos(bbox, pos);
+                                let transform = handle.is_some().then(|| object.get_transform());
+                                (handle, transform)
+                            } else {
+                                (None, None)
+                            };
 
-                        // 如果当前工具是画笔，结束笔画
-                        if self.state.current_tool == CanvasTool::Brush {
+                            self.state.pointers.insert(
+                                id,
+                                PointerState {
+                                    id,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::Selecting {
+                                        drag_start: pos,
+                                        dragged_handle,
+                                        drag_original_transform,
+                                        drag_accumulated_delta: Vec2::ZERO,
+                                    },
+                                },
+                            );
+                        }
+                        CanvasTool::ObjectEraser | CanvasTool::PixelEraser => {
+                            self.state.pointers.insert(
+                                id,
+                                PointerState {
+                                    id,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::Erasing,
+                                },
+                            );
+                        }
+                        CanvasTool::Insert
+                            if self.state.current_insert_tab == InsertTab::Shape
+                                && self.state.selected_shape_type.is_some() =>
+                        {
+                            let shape_type = self.state.selected_shape_type.unwrap();
+                            self.state.pointers.insert(
+                                id,
+                                PointerState {
+                                    id,
+                                    pos,
+                                    prev_pos: None,
+                                    interaction: PointerInteraction::ShapeInsert {
+                                        start_pos: pos,
+                                        shape_type,
+                                    },
+                                },
+                            );
+                        }
+                        _ => {}
+                    },
+                    TouchPhase::Moved => match self.state.current_tool {
+                        CanvasTool::Pan => {
+                            if let Some(pointer) = self.state.pointers.get_mut(&id) {
+                                if let PointerInteraction::Panning { ref mut last_pos } =
+                                    pointer.interaction
+                                {
+                                    let delta = screen_pos - *last_pos;
+                                    self.state.view_offset -= delta;
+                                    *last_pos = screen_pos;
+                                }
+                                pointer.pos = pos;
+                            }
+                        }
+                        CanvasTool::Brush => {
+                            brush_stroke_add_point(&mut self.state, id, pos, false);
+                        }
+                        CanvasTool::Select => {
+                            if let Some(pointer) = self.state.pointers.get_mut(&id) {
+                                pointer.pos = pos;
+
+                                if let PointerInteraction::Selecting {
+                                    ref mut drag_start,
+                                    dragged_handle,
+                                    ref mut drag_accumulated_delta,
+                                    ..
+                                } = pointer.interaction
+                                {
+                                    let delta = pos - *drag_start;
+
+                                    if let Some(idx) = self.state.selected_object_index
+                                        && idx < self.state.canvas.objects.len()
+                                    {
+                                        if let Some(handle) = dragged_handle {
+                                            if let Some(object) =
+                                                self.state.canvas.objects.get_mut(idx)
+                                            {
+                                                object.transform(handle, delta, *drag_start, pos);
+                                            }
+                                        } else {
+                                            if let Some(object) =
+                                                self.state.canvas.objects.get_mut(idx)
+                                            {
+                                                CanvasObject::move_object(object, delta);
+                                            }
+                                            *drag_accumulated_delta += delta;
+                                        }
+                                    }
+
+                                    *drag_start = pos;
+                                }
+                            }
+                        }
+                        CanvasTool::ObjectEraser | CanvasTool::PixelEraser => {
+                            if let Some(pointer) = self.state.pointers.get_mut(&id) {
+                                pointer.pos = pos;
+                            }
+                        }
+                        CanvasTool::Insert => {
+                            if let Some(pointer) = self.state.pointers.get_mut(&id) {
+                                pointer.pos = pos;
+                            }
+                        }
+                        _ => {}
+                    },
+                    TouchPhase::Ended | TouchPhase::Cancelled => match self.state.current_tool {
+                        CanvasTool::Pan => {
+                            self.state.pointers.remove(&id);
+                        }
+                        CanvasTool::Brush => {
                             brush_stroke_end(&mut self.state, id);
                         }
-                    }
+                        CanvasTool::Select => {
+                            if let Some(pointer) = self.state.pointers.get(&id)
+                                && let PointerInteraction::Selecting {
+                                    drag_accumulated_delta,
+                                    drag_original_transform,
+                                    ..
+                                } = &pointer.interaction
+                            {
+                                if let Some(sel_idx) = self.state.selected_object_index
+                                    && *drag_accumulated_delta != Vec2::ZERO
+                                {
+                                    self.state.history.save_move_object(
+                                        sel_idx,
+                                        -*drag_accumulated_delta,
+                                        *drag_accumulated_delta,
+                                    );
+                                }
+                                if let Some(original) = drag_original_transform.clone()
+                                    && let Some(sel_idx) = self.state.selected_object_index
+                                    && sel_idx < self.state.canvas.objects.len()
+                                {
+                                    let new_transform =
+                                        self.state.canvas.objects[sel_idx].get_transform();
+                                    self.state.history.save_transform_object(
+                                        sel_idx,
+                                        original,
+                                        new_transform,
+                                    );
+                                }
+                            }
+                            self.state.pointers.remove(&id);
+                        }
+                        CanvasTool::ObjectEraser | CanvasTool::PixelEraser => {
+                            self.state.pointers.remove(&id);
+                        }
+                        CanvasTool::Insert => {
+                            if let Some(pointer) = self.state.pointers.remove(&id)
+                                && let PointerInteraction::ShapeInsert {
+                                    start_pos,
+                                    shape_type,
+                                } = pointer.interaction
+                            {
+                                let end_pos = pointer.pos;
+                                crate::utils::ui::create_shape_object(
+                                    &mut self.state,
+                                    shape_type,
+                                    start_pos,
+                                    end_pos,
+                                );
+                            }
+                        }
+                        _ => {}
+                    },
                 }
 
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            WindowEvent::CursorMoved {
+                device_id: _,
+                position,
+            } => {
+                self.state.cursor_position = position;
                 self.window.as_ref().unwrap().request_redraw();
             }
             _ => (),

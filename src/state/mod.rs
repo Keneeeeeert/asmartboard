@@ -10,9 +10,9 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use tray_icon::TrayIcon;
 use wgpu::Backend;
 use wgpu::PresentMode;
+use winit::dpi::PhysicalPosition;
 
 #[cfg(feature = "startup_animation")]
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
@@ -26,6 +26,19 @@ use rodio::Player;
 use std::io::Cursor;
 
 use crate::utils;
+
+/// Magic header for canvas files: `b"UWU"` followed by format version byte.
+/// Must be kept in sync with [`CANVAS_FILE_HEADER`].
+const CANVAS_FILE_MAGIC: &[u8; 3] = b"UWU";
+const CANVAS_FILE_VERSION: u8 = 2;
+const CANVAS_FILE_EXT: &str = "owo"; // open whiteboard objects
+
+fn make_canvas_file_header() -> [u8; 4] {
+    let mut h = [0u8; 4];
+    h[..3].copy_from_slice(CANVAS_FILE_MAGIC);
+    h[3] = CANVAS_FILE_VERSION;
+    h
+}
 
 /// Dynamic brush width mode for stroke rendering
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -65,6 +78,7 @@ impl StrokeWidth {
         }
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn max_width(&self) -> f32 {
         match self {
             StrokeWidth::Fixed(w) => *w,
@@ -111,7 +125,7 @@ impl From<Vec<f32>> for StrokeWidth {
     }
 }
 
-/// Transform handle types for object manipulation (resize and rotate)
+/// Transform handle types for object manipulation (resize)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TransformHandle {
     // 8 resize handles around the bounding box
@@ -123,26 +137,35 @@ pub enum TransformHandle {
     BottomLeft,
     Bottom,
     BottomRight,
-    // Rotation handle
-    Rotate,
 }
 
 /// Available tools for canvas interaction
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum CanvasTool {
-    Select, // Select and manipulate objects
+    Passthrough, // Only available in passthrough mode; passes clicks through to underlying windows
+    Select,      // Select and manipulate objects
     #[default]
     Brush, // Draw freehand strokes
+    Pan,         // Pan/move the canvas view
     ObjectEraser, // Delete entire objects
     PixelEraser, // Erase pixel by pixel
-    Insert, // Insert images, text, or shapes
-    Settings, // Open settings panel
+    Insert,      // Insert images, text, or shapes
+    Settings,    // Open settings panel
+}
+
+/// Tabs within the Insert tool
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum InsertTab {
+    #[default]
+    Shape,
+    Text,
+    Image,
 }
 
 /// Trait for objects that can be rendered on the canvas
 pub trait CanvasObjectOps {
-    /// Renders the object using the provided painter
-    fn paint(&self, painter: &egui::Painter, selected: bool);
+    /// Renders the object using the provided painter, offset by `view_offset`
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2);
     /// Returns the axis-aligned bounding rectangle of the object
     fn bounding_box(&self) -> egui::Rect;
     /// Transforms the object using the specified handle and drag parameters
@@ -162,14 +185,14 @@ pub struct CanvasImage {
     pub pos: Pos2,
     pub size: egui::Vec2,
     pub aspect_ratio: f32,
-    pub rot: f32,
-    pub marked_for_deletion: bool, // Deferred deletion to avoid borrow checker issues
+    pub marked_for_deletion: bool, // Deferred deletion to avoid panic due to texture in use
     pub image_data: Arc<[u8]>,     // RGBA pixel data for export
     pub image_size: [u32; 2],      // [width, height] of the original image
 }
 
 impl CanvasObjectOps for CanvasImage {
     /// Transforms the image based on the dragged handle
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn transform(
         &mut self,
         handle: TransformHandle,
@@ -235,20 +258,19 @@ impl CanvasObjectOps for CanvasImage {
                 );
                 self.size = new_size;
             }
-            TransformHandle::Rotate => {
-                // For now, ignore rotation for images
-            }
         }
     }
 
     /// Returns the bounding rectangle of the image
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn bounding_box(&self) -> egui::Rect {
         egui::Rect::from_min_size(self.pos, self.size)
     }
 
     /// Renders the image on the canvas, drawing selection UI if selected
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
-        let img_rect = self.bounding_box();
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
+        let img_rect = self.bounding_box().translate(-view_offset);
         painter.image(
             self.texture.id(),
             img_rect,
@@ -289,11 +311,12 @@ pub struct CanvasText {
     pub pos: Pos2,
     pub color: Color32,
     pub font_size: f32,
-    pub rot: f32,
+    pub cached_size: Option<egui::Vec2>,
 }
 
 impl CanvasObjectOps for CanvasText {
     /// Transforms the text object, scaling font size for resize handles
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn transform(
         &mut self,
         handle: TransformHandle,
@@ -310,27 +333,29 @@ impl CanvasObjectOps for CanvasText {
             | TransformHandle::BottomLeft
             | TransformHandle::Bottom
             | TransformHandle::BottomRight => {
-                // Scale font size based on drag delta
                 let scale_factor = 1.0 + (delta.x + delta.y) / 200.0;
                 self.font_size = (self.font_size * scale_factor).max(6.0);
-            }
-            TransformHandle::Rotate => {
-                // Rotation not yet implemented for text
+                self.cached_size = None;
             }
         }
     }
 
-    /// Returns an approximate bounding rectangle for the text
+    /// Returns the bounding rectangle for the text
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn bounding_box(&self) -> egui::Rect {
-        // Approximate text dimensions
-        let approx_char_width = self.font_size * 0.6;
-        let approx_width = self.text.len() as f32 * approx_char_width;
-        let approx_height = self.font_size * 1.2;
-        egui::Rect::from_min_size(self.pos, egui::vec2(approx_width, approx_height))
+        if let Some(size) = self.cached_size {
+            egui::Rect::from_min_size(self.pos, size)
+        } else {
+            let approx_char_width = self.font_size * 0.6;
+            let approx_width = self.text.len() as f32 * approx_char_width;
+            let approx_height = self.font_size * 1.2;
+            egui::Rect::from_min_size(self.pos, egui::vec2(approx_width, approx_height))
+        }
     }
 
     /// Renders the text on the canvas with optional selection UI
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
         // Draw text using egui's text rendering
         let text_galley = painter.layout_no_wrap(
             self.text.clone(),
@@ -338,18 +363,18 @@ impl CanvasObjectOps for CanvasText {
             self.color,
         );
         let text_shape = egui::epaint::TextShape {
-            pos: self.pos,
+            pos: self.pos - view_offset,
             galley: text_galley.clone(),
             underline: egui::Stroke::NONE,
             override_text_color: None,
-            angle: self.rot,
+            angle: 0.0,
             fallback_color: self.color,
             opacity_factor: 1.0,
         };
         painter.add(text_shape);
 
         if selected {
-            let text_rect = self.bounding_box();
+            let text_rect = self.bounding_box().translate(-view_offset);
             painter.rect_stroke(
                 text_rect,
                 0.0,
@@ -362,7 +387,7 @@ impl CanvasObjectOps for CanvasText {
 }
 
 /// Available shape types for the canvas
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CanvasShapeType {
     Line,
     Arrow,
@@ -378,11 +403,11 @@ pub struct CanvasShape {
     pub pos: Pos2,
     pub size: f32,
     pub color: Color32,
-    pub rotation: f32,
 }
 
 impl CanvasObjectOps for CanvasShape {
     /// Transforms the shape, scaling uniformly for resize handles
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn transform(
         &mut self,
         handle: TransformHandle,
@@ -403,13 +428,11 @@ impl CanvasObjectOps for CanvasShape {
                 let scale_factor = 1.0 + (delta.x + delta.y) / 200.0;
                 self.size = (self.size * scale_factor).max(10.0);
             }
-            TransformHandle::Rotate => {
-                // Rotation not yet implemented for shapes
-            }
         }
     }
 
     /// Returns the bounding rectangle of the shape with padding for handles
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn bounding_box(&self) -> egui::Rect {
         match self.shape_type {
             CanvasShapeType::Line => {
@@ -450,16 +473,18 @@ impl CanvasObjectOps for CanvasShape {
     }
 
     /// Renders the shape and optional selection UI
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
+        let p = self.pos - view_offset;
         // Draw the shape itself
         match self.shape_type {
             CanvasShapeType::Line => {
-                let end_point = Pos2::new(self.pos.x + self.size, self.pos.y);
-                painter.line_segment([self.pos, end_point], Stroke::new(2.0_f32, self.color));
+                let end_point = Pos2::new(p.x + self.size, p.y);
+                painter.line_segment([p, end_point], Stroke::new(2.0_f32, self.color));
             }
             CanvasShapeType::Arrow => {
-                let end_point = Pos2::new(self.pos.x + self.size, self.pos.y);
-                painter.line_segment([self.pos, end_point], Stroke::new(2.0_f32, self.color));
+                let end_point = Pos2::new(p.x + self.size, p.y);
+                painter.line_segment([p, end_point], Stroke::new(2.0_f32, self.color));
 
                 // 绘制箭头头部
                 let arrow_size = self.size * 0.1;
@@ -477,7 +502,7 @@ impl CanvasObjectOps for CanvasShape {
                 painter.line_segment([end_point, arrow_point2], Stroke::new(2.0_f32, self.color));
             }
             CanvasShapeType::Rectangle => {
-                let rect = egui::Rect::from_min_size(self.pos, egui::vec2(self.size, self.size));
+                let rect = egui::Rect::from_min_size(p, egui::vec2(self.size, self.size));
                 painter.rect_stroke(
                     rect,
                     0.0,
@@ -488,9 +513,9 @@ impl CanvasObjectOps for CanvasShape {
             CanvasShapeType::Triangle => {
                 let half_size = self.size / 2.0;
                 let points = [
-                    self.pos,
-                    Pos2::new(self.pos.x + self.size, self.pos.y),
-                    Pos2::new(self.pos.x + half_size, self.pos.y + half_size),
+                    p,
+                    Pos2::new(p.x + self.size, p.y),
+                    Pos2::new(p.x + half_size, p.y + half_size),
                 ];
                 painter.add(egui::Shape::convex_polygon(
                     points.to_vec(),
@@ -499,13 +524,13 @@ impl CanvasObjectOps for CanvasShape {
                 ));
             }
             CanvasShapeType::Circle => {
-                painter.circle_stroke(self.pos, self.size / 2.0, Stroke::new(2.0_f32, self.color));
+                painter.circle_stroke(p, self.size / 2.0, Stroke::new(2.0_f32, self.color));
             }
         }
 
         // Draw selection border and resize handles when selected
         if selected {
-            let shape_rect = self.bounding_box();
+            let shape_rect = self.bounding_box().translate(-view_offset);
             painter.rect_stroke(
                 shape_rect,
                 0.0,
@@ -528,6 +553,7 @@ pub enum CanvasObject {
 
 impl CanvasObject {
     /// Moves an object by the specified delta vector
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn move_object(object: &mut CanvasObject, delta: egui::Vec2) {
         match object {
             CanvasObject::Image(img) => {
@@ -548,35 +574,35 @@ impl CanvasObject {
         }
     }
 
-    /// Extracts transform information (position, size, rotation) from an object
+    /// Extracts transform information (position, size) from an object
     pub fn get_transform(&self) -> ObjectTransform {
         match self {
             CanvasObject::Image(img) => ObjectTransform {
                 pos: img.pos,
                 size: img.size,
-                rotation: img.rot,
             },
             CanvasObject::Text(text) => ObjectTransform {
                 pos: text.pos,
                 size: egui::vec2(text.font_size, text.font_size), // Using font_size for both dimensions
-                rotation: text.rot,
             },
             CanvasObject::Shape(shape) => ObjectTransform {
                 pos: shape.pos,
                 size: egui::vec2(shape.size, shape.size), // Using shape.size for both dimensions
-                rotation: shape.rotation,
             },
-            CanvasObject::Stroke(_stroke) => ObjectTransform {
-                pos: egui::Pos2::new(0.0, 0.0), // Strokes don't have a single position
-                size: egui::Vec2::new(0.0, 0.0), // Strokes don't have a single size
-                rotation: 0.0,                  // Strokes handle rotation differently
-            },
+            CanvasObject::Stroke(stroke) => {
+                let bbox = stroke.bounding_box();
+                ObjectTransform {
+                    pos: bbox.min,
+                    size: bbox.size(),
+                }
+            }
         }
     }
 }
 
 impl CanvasObjectOps for CanvasObject {
     /// Delegates transform to the inner object type
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn transform(
         &mut self,
         handle: TransformHandle,
@@ -595,16 +621,18 @@ impl CanvasObjectOps for CanvasObject {
     }
 
     /// Delegates painting to the inner object type
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
         match self {
-            CanvasObject::Stroke(stroke) => stroke.paint(painter, selected),
-            CanvasObject::Image(image) => image.paint(painter, selected),
-            CanvasObject::Text(text) => text.paint(painter, selected),
-            CanvasObject::Shape(shape) => shape.paint(painter, selected),
+            CanvasObject::Stroke(stroke) => stroke.paint(painter, selected, view_offset),
+            CanvasObject::Image(image) => image.paint(painter, selected, view_offset),
+            CanvasObject::Text(text) => text.paint(painter, selected, view_offset),
+            CanvasObject::Shape(shape) => shape.paint(painter, selected, view_offset),
         }
     }
 
     /// Delegates bounding box calculation to the inner object type
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn bounding_box(&self) -> egui::Rect {
         match self {
             CanvasObject::Stroke(stroke) => stroke.bounding_box(),
@@ -619,7 +647,7 @@ impl CanvasObjectOps for CanvasObject {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum WindowMode {
     Windowed,
-    Fullscreen,
+    ExclusiveFullscreen,
     #[default]
     BorderlessFullscreen,
 }
@@ -644,9 +672,11 @@ pub enum OptimizationPolicy {
 /// Graphics API backend selection
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum GraphicsApi {
-    #[default]
+    #[cfg_attr(not(target_os = "windows"), default)]
     Auto,
     Vulkan,
+    // on windows, using vulkan results in an 8-second hang after resizing the window, so we default to dx12 which is more stable
+    #[cfg_attr(target_os = "windows", default)]
     Dx12,
     Metal,
     WebGpu,
@@ -680,10 +710,29 @@ pub struct PageState {
 }
 
 impl CanvasState {
+    const HEADER_SIZE: usize = 4;
+
     /// Loads canvas state from a file using rkyv binary format
     pub fn load_from_file(path: &std::path::PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let bytes = std::fs::read(path)?;
-        let archived = rkyv::access::<flat::ArchivedCanvasStateFlat, rkyv::rancor::Error>(&bytes)
+
+        if bytes.len() < Self::HEADER_SIZE
+            || bytes[..3] != *CANVAS_FILE_MAGIC
+            || bytes[3] != CANVAS_FILE_VERSION
+        {
+            let actual = if bytes.len() >= 4 {
+                format!("magic={:02x?}, version={}", &bytes[..3], bytes[3])
+            } else {
+                format!("too short ({} bytes)", bytes.len())
+            };
+            return Err(format!(
+                "unsupported canvas file format: expected magic=UWU, version={CANVAS_FILE_VERSION}, got {actual}"
+            )
+            .into());
+        }
+
+        let payload = &bytes[Self::HEADER_SIZE..];
+        let archived = rkyv::access::<flat::ArchivedCanvasStateFlat, rkyv::rancor::Error>(payload)
             .map_err(|e| format!("rkyv error: {e}"))?;
         Ok(Self::from(archived))
     }
@@ -694,16 +743,22 @@ impl CanvasState {
         path: &std::path::PathBuf,
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let flat = CanvasStateFlat::from(self);
-        let bytes =
+        let payload =
             rkyv::to_bytes::<rkyv::rancor::Error>(&flat).map_err(|e| format!("rkyv error: {e}"))?;
-        std::fs::write(path, bytes.as_slice())?;
+
+        let header = make_canvas_file_header();
+        let mut out = Vec::with_capacity(Self::HEADER_SIZE + payload.len());
+        out.extend_from_slice(&header);
+        out.extend_from_slice(payload.as_slice());
+
+        std::fs::write(path, out)?;
         Ok(())
     }
 
     /// Opens a file dialog to load canvas from user-selected file
     pub fn load_from_file_with_dialog() -> Result<Self, Box<dyn std::error::Error>> {
         let path = rfd::FileDialog::new()
-            .add_filter("画布文件", &["sb"])
+            .add_filter("画布文件", &[CANVAS_FILE_EXT])
             .pick_file()
             .ok_or(std::io::Error::new(
                 std::io::ErrorKind::InvalidFilename,
@@ -716,8 +771,8 @@ impl CanvasState {
     /// Opens a file dialog to save canvas to user-selected file
     pub fn save_to_file_with_dialog(&self) -> Result<(), Box<dyn std::error::Error>> {
         let path = rfd::FileDialog::new()
-            .add_filter("画布文件", &["sb"])
-            .set_file_name("canvas.sb")
+            .add_filter("画布文件", &[CANVAS_FILE_EXT])
+            .set_file_name(format!("canvas.{}", CANVAS_FILE_EXT))
             .save_file()
             .ok_or(std::io::Error::new(
                 std::io::ErrorKind::InvalidFilename,
@@ -790,7 +845,7 @@ impl Default for PersistentState {
             interpolation_frequency: 0.1,
             quick_colors: utils::get_default_quick_colors(),
 
-            show_fps: true,
+            show_fps: false,
             window_mode: WindowMode::default(),
             present_mode: PresentMode::AutoVsync,
             optimization_policy: OptimizationPolicy::default(),
@@ -845,117 +900,63 @@ pub struct CanvasStroke {
     pub width: StrokeWidth,
     pub color: Color32,
     pub base_width: f32,
-    pub rot: f32,
-}
-
-impl CanvasStroke {
-    fn scale_stroke_points(stroke: &mut CanvasStroke, center: Pos2, scale_x: f32, scale_y: f32) {
-        for point in &mut stroke.points {
-            let relative = *point - center;
-            point.x = center.x + relative.x * scale_x;
-            point.y = center.y + relative.y * scale_y;
-        }
-        // Scale widths proportionally
-        let avg_scale = (scale_x + scale_y) / 2.0;
-        match &mut stroke.width {
-            StrokeWidth::Fixed(w) => *w *= avg_scale,
-            StrokeWidth::Dynamic(v) => {
-                for width in v.iter_mut() {
-                    *width *= avg_scale;
-                }
-            }
-        }
-    }
-
-    fn move_stroke_to_center(stroke: &mut CanvasStroke, new_center: Pos2) {
-        let current_center = stroke.bounding_box().center();
-        let offset = new_center - current_center;
-        for point in &mut stroke.points {
-            *point += offset;
-        }
-    }
+    pub shape: Option<CanvasShapeType>,
 }
 
 impl CanvasObjectOps for CanvasStroke {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn transform(
         &mut self,
         handle: TransformHandle,
-        delta: egui::Vec2,
+        _delta: egui::Vec2,
         _drag_start: Pos2,
-        _current_pos: Pos2,
+        current_pos: Pos2,
     ) {
         let bbox = self.bounding_box();
-        let center = bbox.center();
+        if bbox.width() < 1.0 || bbox.height() < 1.0 {
+            return;
+        }
 
-        // Calculate scale factors
-        let scale_x = if bbox.width() > 0.0 {
-            (bbox.width() + delta.x) / bbox.width()
-        } else {
-            1.0
-        };
-        let scale_y = if bbox.height() > 0.0 {
-            (bbox.height() + delta.y) / bbox.height()
-        } else {
-            1.0
+        let (new_min, new_max) = match handle {
+            TransformHandle::TopLeft => (current_pos, bbox.max),
+            TransformHandle::Top => (Pos2::new(bbox.min.x, current_pos.y), bbox.max),
+            TransformHandle::TopRight => (
+                Pos2::new(bbox.min.x, current_pos.y),
+                Pos2::new(current_pos.x, bbox.max.y),
+            ),
+            TransformHandle::Left => (Pos2::new(current_pos.x, bbox.min.y), bbox.max),
+            TransformHandle::Right => (bbox.min, Pos2::new(current_pos.x, bbox.max.y)),
+            TransformHandle::BottomLeft => (
+                Pos2::new(current_pos.x, bbox.min.y),
+                Pos2::new(bbox.max.x, current_pos.y),
+            ),
+            TransformHandle::Bottom => (bbox.min, Pos2::new(bbox.max.x, current_pos.y)),
+            TransformHandle::BottomRight => (bbox.min, current_pos),
         };
 
-        match handle {
-            TransformHandle::TopLeft => {
-                let scale = scale_x.min(scale_y);
-                Self::scale_stroke_points(self, center, scale, scale);
-                // Adjust position
-                let new_center = center + delta / 2.0;
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Top => {
-                Self::scale_stroke_points(self, center, 1.0, scale_y);
-                let new_center = Pos2::new(center.x, center.y + delta.y / 2.0);
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::TopRight => {
-                let scale = scale_x.min(scale_y);
-                Self::scale_stroke_points(self, center, scale, scale);
-                let new_center = center + delta / 2.0;
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Left => {
-                Self::scale_stroke_points(self, center, scale_x, 1.0);
-                let new_center = Pos2::new(center.x + delta.x / 2.0, center.y);
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Right => {
-                Self::scale_stroke_points(self, center, scale_x, 1.0);
-                let new_center = Pos2::new(center.x + delta.x / 2.0, center.y);
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::BottomLeft => {
-                let scale = scale_x.min(scale_y);
-                Self::scale_stroke_points(self, center, scale, scale);
-                let new_center = center + delta / 2.0;
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Bottom => {
-                Self::scale_stroke_points(self, center, 1.0, scale_y);
-                let new_center = Pos2::new(center.x, center.y + delta.y / 2.0);
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::BottomRight => {
-                let scale = scale_x.min(scale_y);
-                Self::scale_stroke_points(self, center, scale, scale);
-                let new_center = center + delta / 2.0;
-                Self::move_stroke_to_center(self, new_center);
-            }
-            TransformHandle::Rotate => {
-                // Calculate rotation angle based on drag
-                let center = bbox.center();
-                let current_angle = (_current_pos - center).angle();
-                let start_angle = (_drag_start - center).angle();
-                let delta_angle = current_angle - start_angle;
-                self.rot += delta_angle;
+        let new_width = (new_max.x - new_min.x).max(10.0);
+        let new_height = (new_max.y - new_min.y).max(10.0);
+        let scale_x = new_width / bbox.width();
+        let scale_y = new_height / bbox.height();
+        let avg_scale = (scale_x + scale_y) / 2.0;
+
+        for point in &mut self.points {
+            point.x = new_min.x + (point.x - bbox.min.x) * scale_x;
+            point.y = new_min.y + (point.y - bbox.min.y) * scale_y;
+        }
+
+        match &mut self.width {
+            StrokeWidth::Fixed(w) => *w = (*w * avg_scale).max(1.0),
+            StrokeWidth::Dynamic(widths) => {
+                for w in widths.iter_mut() {
+                    *w = (*w * avg_scale).max(1.0);
+                }
             }
         }
+        self.base_width = (self.base_width * avg_scale).max(1.0);
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn bounding_box(&self) -> egui::Rect {
         if self.points.is_empty() {
             return egui::Rect::from_min_max(Pos2::ZERO, Pos2::ZERO);
@@ -984,58 +985,43 @@ impl CanvasObjectOps for CanvasStroke {
         )
     }
 
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
         let color = if selected { Color32::BLUE } else { self.color };
 
-        // Apply rotation if needed
-        let rotated_points: Vec<Pos2> = if self.rot.abs() > 0.001 {
-            let center = self.bounding_box().center();
-            self.points
-                .iter()
-                .map(|p| {
-                    let dx = p.x - center.x;
-                    let dy = p.y - center.y;
-                    let cos_rot = self.rot.cos();
-                    let sin_rot = self.rot.sin();
-                    Pos2::new(
-                        center.x + dx * cos_rot - dy * sin_rot,
-                        center.y + dx * sin_rot + dy * cos_rot,
-                    )
-                })
-                .collect()
-        } else {
-            self.points.clone()
-        };
+        let offset_points: Vec<Pos2> = self.points.iter().map(|p| *p - view_offset).collect();
 
         painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-            rotated_points[0],
+            offset_points[0],
             self.width.first() / 2.0,
             color,
         )));
-        if rotated_points.len() >= 2 {
+        if self.points.len() >= 2 {
             painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-                rotated_points[rotated_points.len() - 1],
+                offset_points[offset_points.len() - 1],
                 self.width.last() / 2.0,
                 color,
             )));
             match &self.width {
                 StrokeWidth::Fixed(w) => {
-                    if rotated_points.len() == 2 {
+                    if self.points.len() == 2 {
                         painter.line_segment(
-                            [rotated_points[0], rotated_points[1]],
+                            [offset_points[0], offset_points[1]],
                             Stroke::new(*w, color),
                         );
                     } else {
-                        let path =
-                            egui::epaint::PathShape::line(rotated_points, Stroke::new(*w, color));
+                        let path = egui::epaint::PathShape::line(
+                            offset_points.clone(),
+                            Stroke::new(*w, color),
+                        );
                         painter.add(egui::Shape::Path(path));
                     }
                 }
                 StrokeWidth::Dynamic(widths) => {
-                    for i in 0..rotated_points.len() - 1 {
+                    for i in 0..offset_points.len() - 1 {
                         let avg_width = (widths[i] + widths[i + 1]) / 2.0;
                         painter.line_segment(
-                            [rotated_points[i], rotated_points[i + 1]],
+                            [offset_points[i], offset_points[i + 1]],
                             Stroke::new(avg_width, color),
                         );
                     }
@@ -1044,7 +1030,7 @@ impl CanvasObjectOps for CanvasStroke {
         }
 
         if selected {
-            let stroke_rect = self.bounding_box();
+            let stroke_rect = self.bounding_box().translate(-view_offset);
             painter.rect_stroke(
                 stroke_rect,
                 0.0,
@@ -1072,6 +1058,7 @@ impl FpsCounter {
         }
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn update(&mut self) -> f32 {
         self.frame_count += 1;
 
@@ -1095,6 +1082,35 @@ pub struct ActiveStroke {
     pub times: Vec<f64>,             // 每个点的时间戳（用于速度计算）
     pub start_time: Instant,         // 笔画开始时间
     pub last_movement_time: Instant, // 最后一次移动的时间（用于检测停留）
+}
+
+/// Unified per-pointer interaction state for all tools
+pub enum PointerInteraction {
+    Drawing {
+        active_stroke: ActiveStroke,
+    },
+    Selecting {
+        drag_start: Pos2,
+        dragged_handle: Option<TransformHandle>,
+        drag_original_transform: Option<ObjectTransform>,
+        drag_accumulated_delta: egui::Vec2,
+    },
+    Erasing,
+    ShapeInsert {
+        start_pos: Pos2,
+        shape_type: CanvasShapeType,
+    },
+    Panning {
+        last_pos: Pos2,
+    },
+}
+
+/// Represents a single pointer (touch or mouse) on the canvas
+pub struct PointerState {
+    pub id: u64,
+    pub pos: Pos2,
+    pub prev_pos: Option<Pos2>,
+    pub interaction: PointerInteraction,
 }
 
 #[cfg(feature = "startup_animation")]
@@ -1247,7 +1263,6 @@ pub enum HistoryCommand {
 pub struct ObjectTransform {
     pub pos: egui::Pos2,
     pub size: egui::Vec2,
-    pub rotation: f32,
 }
 
 // 历史记录结构
@@ -1429,13 +1444,34 @@ impl History {
             CanvasObject::Text(text) => {
                 text.pos = transform.pos;
                 text.font_size = transform.size.x;
+                text.cached_size = None;
             }
             CanvasObject::Shape(shape) => {
                 shape.pos = transform.pos;
                 shape.size = transform.size.x;
-                shape.rotation = transform.rotation;
             }
-            CanvasObject::Stroke(_) => {}
+            CanvasObject::Stroke(stroke) => {
+                let old_bbox = stroke.bounding_box();
+                if old_bbox.width() < 1.0 || old_bbox.height() < 1.0 {
+                    return;
+                }
+                let scale_x = transform.size.x / old_bbox.width();
+                let scale_y = transform.size.y / old_bbox.height();
+                let avg_scale = (scale_x + scale_y) / 2.0;
+                for point in &mut stroke.points {
+                    point.x = transform.pos.x + (point.x - old_bbox.min.x) * scale_x;
+                    point.y = transform.pos.y + (point.y - old_bbox.min.y) * scale_y;
+                }
+                match &mut stroke.width {
+                    StrokeWidth::Fixed(w) => *w = (*w * avg_scale).max(1.0),
+                    StrokeWidth::Dynamic(widths) => {
+                        for w in widths.iter_mut() {
+                            *w = (*w * avg_scale).max(1.0);
+                        }
+                    }
+                }
+                stroke.base_width = (stroke.base_width * avg_scale).max(1.0);
+            }
         }
     }
 }
@@ -1449,31 +1485,28 @@ impl Default for History {
 // 应用程序状态
 pub struct AppState {
     // canvas states
-    pub canvas: CanvasState,                              // 当前页面的画布
-    pub history: History,                                 // 当前页面的历史记录
-    pub pages: Vec<PageState>,                            // 分页
-    pub current_page: usize,                              // 当前页码
-    pub active_strokes: HashMap<u64, ActiveStroke>, // 多点触控笔画，存储触控 ID 到正在绘制的笔画
-    pub is_drawing: bool,                           // 是否正在绘制
-    pub brush_color: Color32,                       // 画笔颜色
-    pub brush_width: f32,                           // 画笔大小
+    pub canvas: CanvasState,                             // 当前页面的画布
+    pub history: History,                                // 当前页面的历史记录
+    pub pages: Vec<PageState>,                           // 分页
+    pub current_page: usize,                             // 当前页码
+    pub pointers: HashMap<u64, PointerState>, // 统一指针状态表 (鼠标 id=0，触控使用 winit touch id)
+    pub brush_color: Color32,                 // 画笔颜色
+    pub brush_width: f32,                     // 画笔大小
     pub dynamic_brush_width_mode: DynamicBrushWidthMode, // 动态画笔大小微调
-    pub current_tool: CanvasTool,                   // 当前工具
-    pub eraser_size: f32,                           // 橡皮擦大小
-    pub selected_object_index: Option<usize>,       // 选中的对象索引
-    pub drag_start_pos: Option<Pos2>,               // 拖拽开始位置
-    pub dragged_handle: Option<TransformHandle>,    // 正在拖拽的调整句柄
-    pub drag_move_accumulated_delta: egui::Vec2,    // 移动拖拽累计位移
-    pub drag_original_transform: Option<ObjectTransform>, // 拖拽开始时的原始变换（用于 resize 历史记录）
-    pub touch_points: HashMap<u64, Pos2>,                 // 多点触控点，存储触控 ID 到位置的映射
+    pub view_offset: egui::Vec2,              // 画布视图偏移 (无限画布)
+    pub current_tool: CanvasTool,             // 当前工具
+    pub current_insert_tab: InsertTab,        // 插入工具的当前标签页
+    pub selected_shape_type: Option<CanvasShapeType>, // 插入形状时选中的形状类型
+    pub continuous_insert: bool,              // 是否连续插入形状
+    pub shapes_inserted_count: u32,           // 已插入形状的计数
+    pub eraser_size: f32,                     // 橡皮擦大小
+    pub selected_object_index: Option<usize>, // 选中的对象索引（全局共享）
 
     // persistent states
     pub persistent: PersistentState,
 
     // ui states
     pub show_quick_color_edit_window: bool, // 是否显示快捷颜色编辑器
-    pub show_insert_text_window: bool,
-    pub show_insert_shape_window: bool,
     pub show_welcome_window: bool,
     pub show_page_management_window: bool,
 
@@ -1484,26 +1517,27 @@ pub struct AppState {
     pub selected_video_mode_index: Option<usize>, // 选中的视频模式索引
     pub fps_counter: FpsCounter,                  // FPS 计数器
     pub new_quick_color: Color32,                 // 新快捷颜色，用于添加
-    pub using_touch: bool, // 标志当前帧是否已由触控处理，防止鼠标代码重复处理
-    pub show_touch_points: bool, // 是否显示触控点，用于调试
+    pub show_touch_points: bool,                  // 是否显示触控点，用于调试
+
+    pub is_overlay_mode: bool,
+    pub tray: Option<tray_icon::TrayIcon>,
 
     // screenshot states
     pub screenshot_path: Option<PathBuf>,
 
     // cached states
     pub active_backend: Option<Backend>,
+    pub cursor_position: PhysicalPosition<f64>,
 
     // reactive states
     pub present_mode_changed: bool,
+    pub overlay_mode_changed: bool,
 
-    #[cfg(target_os = "windows")]
-    pub show_console: bool, // 是否显示控制台 [仅 Windows]
     #[cfg(feature = "startup_animation")]
     pub startup_animation: Option<StartupAnimation>, // 启动动画
 
     // utils
     pub toasts: Toasts,
-    pub tray: Option<TrayIcon>,
 }
 
 impl Default for AppState {
@@ -1513,31 +1547,28 @@ impl Default for AppState {
             canvas: default_page.canvas.clone(),
             pages: vec![default_page],
             current_page: 0,
-            active_strokes: HashMap::new(),
-            is_drawing: false,
+            pointers: HashMap::new(),
             brush_color: Color32::WHITE,
             brush_width: 3.0,
             dynamic_brush_width_mode: DynamicBrushWidthMode::default(),
+            view_offset: egui::Vec2::ZERO,
             current_tool: CanvasTool::Brush,
+            current_insert_tab: InsertTab::Shape,
+            selected_shape_type: None,
+            continuous_insert: false,
+            shapes_inserted_count: 0,
             eraser_size: 10.0,
             selected_object_index: None,
-            drag_start_pos: None,
-            dragged_handle: None,
-            drag_move_accumulated_delta: egui::Vec2::ZERO,
-            drag_original_transform: None,
             show_size_preview: false,
             fps_counter: FpsCounter::new(),
             should_quit: false,
-            show_insert_text_window: false,
             new_text_content: "".to_string(),
-            show_insert_shape_window: false,
-            touch_points: HashMap::new(),
             fullscreen_video_modes: Vec::new(),
             selected_video_mode_index: None,
             show_quick_color_edit_window: false,
             new_quick_color: Color32::WHITE,
-            using_touch: false,
             show_touch_points: false,
+            tray: None,
             show_welcome_window: true,
             show_page_management_window: false,
             persistent: PersistentState::load_from_file(),
@@ -1546,11 +1577,14 @@ impl Default for AppState {
                 .with_anchor(egui_notify::Anchor::BottomRight)
                 .with_margin(egui::vec2(20.0, 20.0)),
             history: History::default(),
-            tray: None,
             active_backend: None,
             present_mode_changed: false,
-            #[cfg(target_os = "windows")]
-            show_console: false,
+            is_overlay_mode: false,
+            overlay_mode_changed: false,
+            cursor_position: PhysicalPosition {
+                x: 0.0_f64,
+                y: 0.0_f64,
+            },
             #[cfg(feature = "startup_animation")]
             startup_animation: None,
         }

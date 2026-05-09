@@ -9,8 +9,6 @@ pub mod windows;
 #[cfg(target_os = "linux")]
 pub mod linux;
 
-use std::sync::OnceLock;
-
 use egui::{Color32, Painter, Pos2, Rect, Stroke};
 use image::{DynamicImage, GenericImageView};
 use ttf_parser::{Face, OutlineBuilder};
@@ -18,8 +16,13 @@ use ttf_parser::{Face, OutlineBuilder};
 use crate::state::{CanvasStroke, DynamicBrushWidthMode, StrokeWidth, TransformHandle};
 
 // 检查点是否与笔画相交（用于对象橡皮擦）
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn point_intersects_stroke(pos: Pos2, stroke: &CanvasStroke, eraser_size: f32) -> bool {
     let eraser_radius = eraser_size / 2.0;
+    if stroke.points.len() == 1 {
+        let dist = pos.distance(stroke.points[0]);
+        return dist <= eraser_radius + stroke.width.first() / 2.0;
+    }
     for i in 0..stroke.points.len() - 1 {
         let p1 = stroke.points[i];
         let p2 = stroke.points[i + 1];
@@ -37,6 +40,7 @@ pub fn point_intersects_stroke(pos: Pos2, stroke: &CanvasStroke, eraser_size: f3
 }
 
 // 计算点到线段的最短距离
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn point_to_line_segment_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let ab = Pos2::new(b.x - a.x, b.y - a.y);
     let ap = Pos2::new(p.x - a.x, p.y - a.y);
@@ -53,6 +57,7 @@ pub fn point_to_line_segment_distance(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 }
 
 // 计算动态画笔宽度
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn calculate_dynamic_width(
     base_width: f32,
     mode: DynamicBrushWidthMode,
@@ -92,6 +97,7 @@ pub fn calculate_dynamic_width(
 }
 
 // 插值算法 - 在点之间插入中间点
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn apply_point_interpolation_in_place(
     points: &mut Vec<Pos2>,
     width: &StrokeWidth,
@@ -169,6 +175,7 @@ pub fn apply_point_interpolation_in_place(
 }
 
 #[must_use]
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn apply_stroke_smoothing(points: &[Pos2]) -> Vec<Pos2> {
     if points.len() < 3 {
         return points.to_vec();
@@ -259,6 +266,7 @@ pub fn apply_stroke_smoothing(points: &[Pos2]) -> Vec<Pos2> {
 }
 
 // 判断笔画是否近似一条直线
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn is_stroke_linear(points: &[Pos2], tolerance: f32) -> bool {
     if points.len() < 3 {
         return true;
@@ -293,6 +301,7 @@ pub fn is_stroke_linear(points: &[Pos2], tolerance: f32) -> bool {
 }
 
 // 拉直笔画
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn straighten_stroke(points: &[Pos2], tolerance: f32) -> Vec<Pos2> {
     if is_stroke_linear(points, tolerance) {
         match points.len() {
@@ -400,7 +409,7 @@ pub fn straighten_stroke(points: &[Pos2], tolerance: f32) -> Vec<Pos2> {
 
 pub fn draw_size_preview(painter: &Painter, pos: Pos2, size: f32) {
     const SIZE_PREVIEW_BORDER_WIDTH: f32 = 2.0;
-    let radius = size / SIZE_PREVIEW_BORDER_WIDTH;
+    let radius = size / 2.0;
     painter.circle_filled(pos, radius, Color32::WHITE);
     painter.circle_stroke(
         pos,
@@ -455,6 +464,7 @@ pub fn get_default_canvas_color() -> Color32 {
 }
 
 // 绘制调整句柄
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn draw_resize_handles(painter: &egui::Painter, bbox: Rect) {
     let handle_size = 12.0;
     let handle_stroke = Stroke::new(1.0_f32, Color32::WHITE);
@@ -486,17 +496,6 @@ pub fn draw_resize_handles(painter: &egui::Painter, bbox: Rect) {
         painter.rect_filled(handle_rect, 0.0, handle_fill);
         painter.rect_stroke(handle_rect, 0.0, handle_stroke, egui::StrokeKind::Outside);
     }
-
-    // 旋转句柄（在顶部稍微上方）
-    let rotate_pos = Pos2::new(bbox.center().x, bbox.top() - 20.0);
-    painter.circle_filled(rotate_pos, handle_size / 2.0, handle_fill);
-    painter.circle_stroke(rotate_pos, handle_size / 2.0, handle_stroke);
-
-    // 绘制旋转指示线
-    painter.line_segment(
-        [bbox.center_top(), rotate_pos],
-        Stroke::new(1.0_f32, Color32::GRAY),
-    );
 }
 
 // 获取鼠标位置下的调整句柄
@@ -531,14 +530,6 @@ pub fn get_transform_handle_at_pos(bbox: Rect, pos: Pos2) -> Option<TransformHan
         if handle_rect.contains(pos) {
             return Some(*handle_type);
         }
-    }
-
-    // 检查旋转句柄
-    let rotate_pos = Pos2::new(bbox.center().x, bbox.top() - 20.0);
-    let rotate_rect =
-        Rect::from_center_size(rotate_pos, egui::vec2(handle_hit_size, handle_hit_size));
-    if rotate_rect.contains(pos) {
-        return Some(TransformHandle::Rotate);
     }
 
     None
@@ -588,7 +579,7 @@ pub fn rasterize_text(
                     width: StrokeWidth::Fixed(1.0),
                     color: text.color,
                     base_width: text.font_size,
-                    rot: 0.0,
+                    shape: None,
                 });
             }
 
@@ -659,51 +650,3 @@ impl OutlineBuilder for StrokeBuilder {
         }
     }
 }
-
-#[cfg(feature = "embedded_font")]
-pub const EMBEDDED_FONT: &[u8] = include_bytes!("../assets/fonts/noto-sans-cjk-sc-regular.otf");
-
-pub fn font_bytes() -> &'static [u8] {
-    static FONT: OnceLock<Vec<u8>> = OnceLock::new();
-
-    FONT.get_or_init(|| {
-        #[cfg(feature = "embedded_font")]
-        {
-            EMBEDDED_FONT.to_vec()
-        }
-
-        #[cfg(feature = "system_font")]
-        {
-            let mut font_db = fontdb::Database::new();
-            font_db.load_system_fonts();
-
-            let cjk_font_names = [
-                "Noto Sans CJK SC",
-                "Noto Sans CJK",
-                "Microsoft YaHei",
-                "微软雅黑",
-            ];
-
-            for font_name in &cjk_font_names {
-                if let Some(face_id) = font_db.query(&fontdb::Query {
-                    families: &[fontdb::Family::Name(font_name)],
-                    weight: fontdb::Weight::NORMAL,
-                    stretch: fontdb::Stretch::Normal,
-                    style: fontdb::Style::Normal,
-                }) {
-                    if let Some(font_data) =
-                        font_db.with_face_data(face_id, |data, _| Some(data.to_vec()))
-                        && let Some(font_bytes) = font_data
-                    {
-                        return font_bytes;
-                    }
-                }
-            }
-
-            panic!("cannot find cjk font")
-        }
-    })
-}
-
-#[cfg(all(feature = "embedded_font", feature = "system_font"))]
-compile_error!("Features 'embedded_font' and 'system_fonts' cannot be enabled together");

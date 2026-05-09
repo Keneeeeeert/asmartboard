@@ -1,5 +1,6 @@
 mod app;
 mod assets;
+mod passthrough_helper;
 mod render;
 mod state;
 mod ui;
@@ -18,6 +19,9 @@ fn main() {
     #[cfg(target_os = "linux")]
     utils::linux::silence_glib_logs();
 
+    #[cfg(feature = "profiling")]
+    puffin::set_scopes_on(true);
+
     std::panic::set_hook(Box::new(|info| {
         let bt = Backtrace::force_capture();
         let msg = format!("panic: {info}\nbacktrace:\n{bt}");
@@ -35,6 +39,20 @@ fn main() {
             .set_buttons(rfd::MessageButtons::Ok)
             .show();
     }));
+
+    println!(
+        r"
+          __  ___      ____  __
+         / / / / | /| / / / / /
+        / /_/ /| |/ |/ / /_/ /
+        \__,_/ |__/|__/\__,_/
+    "
+    );
+    println!(
+        "
+   \x1b[3mERH Remembers Handwriting\x1b[0m
+    "
+    );
 
     pollster::block_on(run_desktop());
 }
