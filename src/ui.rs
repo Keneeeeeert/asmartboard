@@ -1170,7 +1170,13 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
             if state.current_tool == CanvasTool::Passthrough {
                 ui.my_label(egui::RichText::new("(当前处于穿透模式, 输入将穿透画布)").italics());
             } else if state.current_tool == CanvasTool::Pan {
-                ui.my_label(egui::RichText::new("(拖拽以移动画布视图)").italics());
+                ui.my_label(egui::RichText::new("(在画布上滑动以移动视图)").italics());
+                ui.horizontal(|ui| {
+                    ui.my_label("视图操作:");
+                    if ui.button("重置").clicked() {
+                        state.view_offset = Default::default();
+                    }
+                });
             } else if state.current_tool == CanvasTool::Select {
                 if let Some(selected_idx) = state.selected_object_index {
                     ui.horizontal(|ui| {
@@ -1185,17 +1191,13 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                             state.toasts.success("对象已删除!");
                         }
                         if ui.button("复制").clicked() {
-                            // FIXME: CanvasImage duplication not implemented
-                            if !matches!(state.canvas.objects[selected_idx], CanvasObject::Image(_))
-                            {
-                                let mut clone = state.canvas.objects[selected_idx].clone();
-                                CanvasObject::move_object(&mut clone, egui::vec2(20.0, 20.0));
-                                let index = state.canvas.objects.len();
-                                state.history.save_add_object(index, clone.clone());
-                                state.canvas.objects.push(clone);
-                                state.selected_object_index = Some(index);
-                                state.toasts.success("对象已复制!");
-                            }
+                            let mut clone = state.canvas.objects[selected_idx].clone();
+                            CanvasObject::move_object(&mut clone, egui::vec2(20.0, 20.0));
+                            let index = state.canvas.objects.len();
+                            state.history.save_add_object(index, clone.clone());
+                            state.canvas.objects.push(clone);
+                            state.selected_object_index = Some(index);
+                            state.toasts.success("对象已复制!");
                         }
                         if ui.button("置顶").clicked()
                             && selected_idx < state.canvas.objects.len() - 1
@@ -1515,7 +1517,7 @@ pub fn ui_toolbar(state: &mut AppState, ctx: &Context, window: &Arc<Window>) -> 
                         });
 
                         if state.selected_shape_type.is_some() {
-                            ui.my_label(egui::RichText::new("(拖拽画布以绘制形状)").italics());
+                            ui.my_label(egui::RichText::new("(在画布上滑动以绘制形状)").italics());
                         }
 
                         ui.checkbox(&mut state.continuous_insert, "连续插入");
