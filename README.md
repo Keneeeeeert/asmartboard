@@ -47,7 +47,7 @@ cargo build --release --no-default-features --features embedded_font,profiling
 
 #### prepare
 
-good luck figuring this out if you're not using arch
+good luck figuring this out if you're not using arch (download & install manually from [gh releases](https://github.com/mstorsjo/llvm-mingw/releases))
 
 ```bash
 # first add chaotic-aur, then
@@ -57,13 +57,15 @@ yay -S llvm-mingw llvm lld
 add the following to `~/.cargo/config.toml`
 
 ```toml
-[target.x86_64-pc-windows-gnu]
+[target.x86_64-pc-windows-gnullvm]
 linker = "x86_64-w64-mingw32-clang"
 ar = "x86_64-w64-mingw32-ar"
+rustflags = ["-Ctarget-feature=+crt-static"] # statically link libunwind.dll
 
 [target.aarch64-pc-windows-gnullvm]
 linker = "aarch64-w64-mingw32-clang"
 ar = "aarch64-w64-mingw32-ar"
+rustflags = ["-Ctarget-feature=+crt-static"] # statically link libunwind.dll
 ```
 
 #### compile x86_64
