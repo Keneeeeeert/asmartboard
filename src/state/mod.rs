@@ -142,14 +142,14 @@ pub enum TransformHandle {
 /// Available tools for canvas interaction
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum CanvasTool {
-    Select, // Select and manipulate objects
+    Passthrough, // Only available in passthrough mode; passes clicks through to underlying windows
+    Select,      // Select and manipulate objects
     #[default]
     Brush, // Draw freehand strokes
     ObjectEraser, // Delete entire objects
     PixelEraser, // Erase pixel by pixel
-    Insert, // Insert images, text, or shapes
-    Settings, // Open settings panel
-    Passthrough, // Only available in passthrough mode; passes clicks through to underlying windows
+    Insert,      // Insert images, text, or shapes
+    Settings,    // Open settings panel
 }
 
 /// Tabs within the Insert tool
@@ -184,7 +184,7 @@ pub struct CanvasImage {
     pub pos: Pos2,
     pub size: egui::Vec2,
     pub aspect_ratio: f32,
-    pub marked_for_deletion: bool, // Deferred deletion to avoid borrow checker issues
+    pub marked_for_deletion: bool, // Deferred deletion to avoid panic due to texture in use
     pub image_data: Arc<[u8]>,     // RGBA pixel data for export
     pub image_size: [u32; 2],      // [width, height] of the original image
 }
