@@ -1815,28 +1815,31 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
             CanvasTool::Pan => {
                 if !has_touch {
                     if response.drag_started() {
-                        if let Some(pos) = canvas_pos {
+                        if let Some(screen_pos) = pointer_pos
+                            && let Some(pos) = canvas_pos
+                        {
                             state.pointers.insert(
                                 0,
                                 PointerState {
                                     id: 0,
                                     pos,
                                     prev_pos: None,
-                                    interaction: PointerInteraction::Panning { last_pos: pos },
+                                    interaction: PointerInteraction::Panning { last_pos: screen_pos },
                                 },
                             );
                         }
                     } else if response.dragged() {
                         if let Some(pointer) = state.pointers.get_mut(&0)
                             && matches!(pointer.interaction, PointerInteraction::Panning { .. })
+                            && let Some(screen_pos) = pointer_pos
                             && let Some(pos) = canvas_pos
                         {
                             if let PointerInteraction::Panning { ref mut last_pos } =
                                 pointer.interaction
                             {
-                                let delta = pos - *last_pos;
+                                let delta = screen_pos - *last_pos;
                                 state.view_offset -= delta;
-                                *last_pos = pos;
+                                *last_pos = screen_pos;
                             }
                             pointer.pos = pos;
                         }

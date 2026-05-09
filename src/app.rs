@@ -538,7 +538,7 @@ impl ApplicationHandler<()> for App {
                                     id,
                                     pos,
                                     prev_pos: None,
-                                    interaction: PointerInteraction::Panning { last_pos: pos },
+                                    interaction: PointerInteraction::Panning { last_pos: screen_pos },
                                 },
                             );
                         }
@@ -623,9 +623,9 @@ impl ApplicationHandler<()> for App {
                                 if let PointerInteraction::Panning { ref mut last_pos } =
                                     pointer.interaction
                                 {
-                                    let delta = pos - *last_pos;
+                                    let delta = screen_pos - *last_pos;
                                     self.state.view_offset -= delta;
-                                    *last_pos = pos;
+                                    *last_pos = screen_pos;
                                 }
                                 pointer.pos = pos;
                             }
