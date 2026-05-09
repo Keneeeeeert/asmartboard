@@ -538,7 +538,9 @@ impl ApplicationHandler<()> for App {
                                     id,
                                     pos,
                                     prev_pos: None,
-                                    interaction: PointerInteraction::Panning { last_pos: screen_pos },
+                                    interaction: PointerInteraction::Panning {
+                                        last_pos: screen_pos,
+                                    },
                                 },
                             );
                         }

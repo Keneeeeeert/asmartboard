@@ -1618,7 +1618,6 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
         }
 
         // 绘制当前正在绘制的笔画
-        // TODO: unify with CanvasStroke::paint()
         for pointer in state.pointers.values() {
             if let PointerInteraction::Drawing { active_stroke } = &pointer.interaction {
                 if let StrokeWidth::Dynamic(v) = &active_stroke.width
@@ -1824,7 +1823,9 @@ pub fn ui_canvas(state: &mut AppState, ctx: &Context) {
                                     id: 0,
                                     pos,
                                     prev_pos: None,
-                                    interaction: PointerInteraction::Panning { last_pos: screen_pos },
+                                    interaction: PointerInteraction::Panning {
+                                        last_pos: screen_pos,
+                                    },
                                 },
                             );
                         }
