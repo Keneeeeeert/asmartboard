@@ -10,7 +10,6 @@ use wgpu::CurrentSurfaceTexture;
 use winit::dpi::{LogicalPosition, LogicalSize, Position};
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
-use winit::platform::windows::WindowAttributesExtWindows;
 use winit::window::{Window, WindowId, WindowLevel};
 
 pub struct PassthroughHelper {
@@ -25,14 +24,17 @@ impl App {
         let window_size = LogicalSize::new(180.0, 50.0);
 
         let mut attrs = Window::default_attributes()
+            .with_title("uwu")
+            .with_window_level(WindowLevel::AlwaysOnTop)
             .with_transparent(false)
             .with_inner_size(window_size)
             .with_resizable(false)
-            .with_decorations(true);
+            .with_decorations(false);
 
         #[cfg(target_os = "windows")]
         {
-            attrs = attrs.with_skip_taskbar(false);
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attrs = attrs.with_skip_taskbar(true);
         }
 
         if let Some(monitor) = event_loop.primary_monitor() {
@@ -48,8 +50,6 @@ impl App {
         let window = event_loop.create_window(attrs).unwrap();
 
         let window = Arc::new(window);
-        window.set_window_level(WindowLevel::AlwaysOnTop);
-        window.set_title("uwu");
 
         let render_state = self.render_state.as_ref().unwrap();
 

@@ -8,13 +8,11 @@ repository = "https://github.com/Ujhhgtg/uwu/"
 license-file = "LICENSE"
 
 [features]
-default = ["system_font", "wayland"]
+default = ["system_font"]
 startup_animation = ["rodio"]
 embedded_font = []
 system_font = ["fontdb"]
 profiling = ["dep:profiling", "puffin", "puffin_egui"]
-wayland = ["egui-winit/wayland", "winit/wayland", "egui-wgpu/wayland"]
-x11 = ["egui-winit/x11", "winit/x11", "egui-wgpu/x11"]
 
 [dependencies]
 # ui & render
@@ -72,13 +70,15 @@ puffin = { git = "https://github.com/EmbarkStudios/puffin" }      # crates.io ve
 puffin_egui = { git = "https://github.com/EmbarkStudios/puffin" } # crates.io version uses out-of-date egui
 
 [build-dependencies]
-shellexpand = "*"
 winres = "*"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 glib = { version = "0.22", default-features = false }
-x11rb = "*"
-once_cell = "*"
+egui-winit = { version = "0.34", default-features = false, features = [
+    "wayland",
+] }
+winit = { version = "0.30", default-features = false, features = ["wayland"] }
+egui-wgpu = { version = "0.34", features = ["wayland"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "*", features = [
@@ -94,6 +94,3 @@ winreg = "*"
 [profile.release]
 strip = true
 debug = 0
-
-[lints.clippy]
-collapsible_if = "allow"

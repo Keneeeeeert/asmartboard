@@ -72,28 +72,37 @@ impl App {
         }
     }
 
-    pub async fn set_window(&mut self, window: Window) {
-        let window = Arc::new(window);
-
-        // title
-        window.set_title("uwu");
-
+    pub async fn create_window(&mut self, event_loop: &ActiveEventLoop) {
         // icon
-        {
-            let icon = image::load_from_memory(ICON).expect("invalid icon data");
-            let rgba = icon.to_rgba8().to_vec();
-            let (width, height) = icon.dimensions();
-            let winit_icon = Some(
-                winit::window::Icon::from_rgba(rgba.clone(), width, height)
-                    .expect("invalid icon data"),
-            );
-            window.set_window_icon(winit_icon.clone());
+        let icon = image::load_from_memory(ICON).expect("invalid icon data");
+        let rgba = icon.to_rgba8().to_vec();
+        let (width, height) = icon.dimensions();
+        let winit_icon =
+            Some(winit::window::Icon::from_rgba(rgba, width, height).expect("invalid icon data"));
 
-            #[cfg(target_os = "windows")]
-            {
-                use winit::platform::windows::WindowExtWindows;
-                window.set_taskbar_icon(winit_icon);
-            }
+        let window = Arc::new(
+            event_loop
+                .create_window(
+                    Window::default_attributes()
+                        .with_title("uwu")
+                        .with_transparent(true)
+                        .with_window_icon({
+                            #[cfg(target_os = "windows")]
+                            {
+                                let icon = winit_icon.clone();
+                                icon
+                            }
+                            #[cfg(not(target_os = "windows"))]
+                            winit_icon
+                        }),
+                )
+                .unwrap(),
+        );
+
+        #[cfg(target_os = "windows")]
+        {
+            use winit::platform::windows::WindowExtWindows;
+            window.set_taskbar_icon(winit_icon);
         }
 
         // prepare exclusive fullscreen video modes
@@ -104,7 +113,9 @@ impl App {
         if let Some(monitor) = monitor {
             self.state.fullscreen_video_modes = monitor.video_modes().collect();
         } else {
-            eprintln!("error: failed to get monitor, exclusive fullscreen mode will be unavailable")
+            eprintln!(
+                "warning: failed to get monitor, exclusive fullscreen mode will be unavailable"
+            )
         }
 
         // window mode
@@ -155,6 +166,9 @@ error: failed to enable premultiplied alpha for window: {:?}
             self.state.persistent.theme_mode,
             self.state.persistent.canvas_color,
         );
+
+        // first draw
+        window.request_redraw();
 
         self.window.get_or_insert(window);
         self.render_state.get_or_insert(state);
@@ -423,13 +437,7 @@ error: failed to enable premultiplied alpha for window: {:?}
 
 impl ApplicationHandler<()> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window = event_loop
-            // support transparency
-            .create_window(Window::default_attributes().with_transparent(true))
-            .unwrap();
-        pollster::block_on(self.set_window(window));
-        // redraw on window creation
-        self.window.as_ref().unwrap().request_redraw();
+        pollster::block_on(self.create_window(event_loop));
     }
 
     // redraw if egui requests repaint

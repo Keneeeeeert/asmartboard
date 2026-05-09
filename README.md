@@ -8,7 +8,7 @@ reinventing the wheel because ~~others suck~~ why not
 
 - lightning-fast startup speed
 
-- good framerates
+- good frame rates
 
 - multi-touch support for every tool
 
@@ -58,7 +58,7 @@ add the following to `~/.cargo/config.toml`
 
 ```toml
 [target.x86_64-pc-windows-gnu]
-linker = "x86_64-w64-mingw32-gcc"
+linker = "x86_64-w64-mingw32-clang"
 ar = "x86_64-w64-mingw32-ar"
 
 [target.aarch64-pc-windows-gnullvm]
@@ -70,8 +70,8 @@ ar = "aarch64-w64-mingw32-ar"
 
 ```bash
 export PATH=/opt/llvm-mingw/bin/:$PATH
-rustup target add x86_64-pc-windows-gnu
-cargo build --release --target x86_64-pc-windows-gnu
+rustup target add x86_64-pc-windows-gnullvm
+cargo build --release --target x86_64-pc-windows-gnullvm
 ```
 
 #### compile aarch64
@@ -92,7 +92,7 @@ egui + wgpu + winit
 
 - macos (untested)
 
-- linux (mouse passthrough support might vary from DE/WMs; it is recommended to use default `wayland`; you can use `--no-default-features --features x11` if you insist; tested: GNOME (mutter), KDE (KWin), Hyprland)
+- linux (mouse passthrough support might vary from DE/WMs; tested: GNOME (mutter), KDE (KWin), Hyprland)
 
 ## credits
 

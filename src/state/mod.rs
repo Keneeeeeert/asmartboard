@@ -31,6 +31,7 @@ use crate::utils;
 /// Must be kept in sync with [`CANVAS_FILE_HEADER`].
 const CANVAS_FILE_MAGIC: &[u8; 3] = b"UWU";
 const CANVAS_FILE_VERSION: u8 = 2;
+const CANVAS_FILE_EXT: &str = "owo"; // open whiteboard objects
 
 fn make_canvas_file_header() -> [u8; 4] {
     let mut h = [0u8; 4];
@@ -755,7 +756,7 @@ impl CanvasState {
     /// Opens a file dialog to load canvas from user-selected file
     pub fn load_from_file_with_dialog() -> Result<Self, Box<dyn std::error::Error>> {
         let path = rfd::FileDialog::new()
-            .add_filter("画布文件", &["sb"])
+            .add_filter("画布文件", &[CANVAS_FILE_EXT])
             .pick_file()
             .ok_or(std::io::Error::new(
                 std::io::ErrorKind::InvalidFilename,
@@ -768,8 +769,8 @@ impl CanvasState {
     /// Opens a file dialog to save canvas to user-selected file
     pub fn save_to_file_with_dialog(&self) -> Result<(), Box<dyn std::error::Error>> {
         let path = rfd::FileDialog::new()
-            .add_filter("画布文件", &["sb"])
-            .set_file_name("canvas.sb")
+            .add_filter("画布文件", &[CANVAS_FILE_EXT])
+            .set_file_name(format!("canvas.{}", CANVAS_FILE_EXT))
             .save_file()
             .ok_or(std::io::Error::new(
                 std::io::ErrorKind::InvalidFilename,
