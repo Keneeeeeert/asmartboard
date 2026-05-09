@@ -88,16 +88,16 @@ jobs:
                   echo "/opt/llvm-mingw/bin" >> "$GITHUB_PATH"
                   mkdir -p ~/.cargo
                   cat >> ~/.cargo/config.toml << 'EOF'
-[target.x86_64-pc-windows-gnullvm]
-linker = "x86_64-w64-mingw32-clang"
-ar = "x86_64-w64-mingw32-ar"
-rustflags = ["-Ctarget-feature=+crt-static"]
+                  [target.x86_64-pc-windows-gnullvm]
+                  linker = "x86_64-w64-mingw32-clang"
+                  ar = "x86_64-w64-mingw32-ar"
+                  rustflags = ["-Ctarget-feature=+crt-static"]
 
-[target.aarch64-pc-windows-gnullvm]
-linker = "aarch64-w64-mingw32-clang"
-ar = "aarch64-w64-mingw32-ar"
-rustflags = ["-Ctarget-feature=+crt-static"]
-EOF
+                  [target.aarch64-pc-windows-gnullvm]
+                  linker = "aarch64-w64-mingw32-clang"
+                  ar = "aarch64-w64-mingw32-ar"
+                  rustflags = ["-Ctarget-feature=+crt-static"]
+                  EOF
 
             - name: Add Rust target (cross-compile)
               if: matrix.target
