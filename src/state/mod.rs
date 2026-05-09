@@ -146,6 +146,7 @@ pub enum CanvasTool {
     Select,      // Select and manipulate objects
     #[default]
     Brush, // Draw freehand strokes
+    Pan,         // Pan/move the canvas view
     ObjectEraser, // Delete entire objects
     PixelEraser, // Erase pixel by pixel
     Insert,      // Insert images, text, or shapes
@@ -163,8 +164,8 @@ pub enum InsertTab {
 
 /// Trait for objects that can be rendered on the canvas
 pub trait CanvasObjectOps {
-    /// Renders the object using the provided painter
-    fn paint(&self, painter: &egui::Painter, selected: bool);
+    /// Renders the object using the provided painter, offset by `view_offset`
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2);
     /// Returns the axis-aligned bounding rectangle of the object
     fn bounding_box(&self) -> egui::Rect;
     /// Transforms the object using the specified handle and drag parameters
@@ -268,8 +269,8 @@ impl CanvasObjectOps for CanvasImage {
 
     /// Renders the image on the canvas, drawing selection UI if selected
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
-        let img_rect = self.bounding_box();
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
+        let img_rect = self.bounding_box().translate(-view_offset);
         painter.image(
             self.texture.id(),
             img_rect,
@@ -354,7 +355,7 @@ impl CanvasObjectOps for CanvasText {
 
     /// Renders the text on the canvas with optional selection UI
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
         // Draw text using egui's text rendering
         let text_galley = painter.layout_no_wrap(
             self.text.clone(),
@@ -362,7 +363,7 @@ impl CanvasObjectOps for CanvasText {
             self.color,
         );
         let text_shape = egui::epaint::TextShape {
-            pos: self.pos,
+            pos: self.pos - view_offset,
             galley: text_galley.clone(),
             underline: egui::Stroke::NONE,
             override_text_color: None,
@@ -373,7 +374,7 @@ impl CanvasObjectOps for CanvasText {
         painter.add(text_shape);
 
         if selected {
-            let text_rect = self.bounding_box();
+            let text_rect = self.bounding_box().translate(-view_offset);
             painter.rect_stroke(
                 text_rect,
                 0.0,
@@ -473,16 +474,17 @@ impl CanvasObjectOps for CanvasShape {
 
     /// Renders the shape and optional selection UI
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
+        let p = self.pos - view_offset;
         // Draw the shape itself
         match self.shape_type {
             CanvasShapeType::Line => {
-                let end_point = Pos2::new(self.pos.x + self.size, self.pos.y);
-                painter.line_segment([self.pos, end_point], Stroke::new(2.0_f32, self.color));
+                let end_point = Pos2::new(p.x + self.size, p.y);
+                painter.line_segment([p, end_point], Stroke::new(2.0_f32, self.color));
             }
             CanvasShapeType::Arrow => {
-                let end_point = Pos2::new(self.pos.x + self.size, self.pos.y);
-                painter.line_segment([self.pos, end_point], Stroke::new(2.0_f32, self.color));
+                let end_point = Pos2::new(p.x + self.size, p.y);
+                painter.line_segment([p, end_point], Stroke::new(2.0_f32, self.color));
 
                 // 绘制箭头头部
                 let arrow_size = self.size * 0.1;
@@ -500,7 +502,7 @@ impl CanvasObjectOps for CanvasShape {
                 painter.line_segment([end_point, arrow_point2], Stroke::new(2.0_f32, self.color));
             }
             CanvasShapeType::Rectangle => {
-                let rect = egui::Rect::from_min_size(self.pos, egui::vec2(self.size, self.size));
+                let rect = egui::Rect::from_min_size(p, egui::vec2(self.size, self.size));
                 painter.rect_stroke(
                     rect,
                     0.0,
@@ -511,9 +513,9 @@ impl CanvasObjectOps for CanvasShape {
             CanvasShapeType::Triangle => {
                 let half_size = self.size / 2.0;
                 let points = [
-                    self.pos,
-                    Pos2::new(self.pos.x + self.size, self.pos.y),
-                    Pos2::new(self.pos.x + half_size, self.pos.y + half_size),
+                    p,
+                    Pos2::new(p.x + self.size, p.y),
+                    Pos2::new(p.x + half_size, p.y + half_size),
                 ];
                 painter.add(egui::Shape::convex_polygon(
                     points.to_vec(),
@@ -522,13 +524,13 @@ impl CanvasObjectOps for CanvasShape {
                 ));
             }
             CanvasShapeType::Circle => {
-                painter.circle_stroke(self.pos, self.size / 2.0, Stroke::new(2.0_f32, self.color));
+                painter.circle_stroke(p, self.size / 2.0, Stroke::new(2.0_f32, self.color));
             }
         }
 
         // Draw selection border and resize handles when selected
         if selected {
-            let shape_rect = self.bounding_box();
+            let shape_rect = self.bounding_box().translate(-view_offset);
             painter.rect_stroke(
                 shape_rect,
                 0.0,
@@ -620,12 +622,12 @@ impl CanvasObjectOps for CanvasObject {
 
     /// Delegates painting to the inner object type
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
         match self {
-            CanvasObject::Stroke(stroke) => stroke.paint(painter, selected),
-            CanvasObject::Image(image) => image.paint(painter, selected),
-            CanvasObject::Text(text) => text.paint(painter, selected),
-            CanvasObject::Shape(shape) => shape.paint(painter, selected),
+            CanvasObject::Stroke(stroke) => stroke.paint(painter, selected, view_offset),
+            CanvasObject::Image(image) => image.paint(painter, selected, view_offset),
+            CanvasObject::Text(text) => text.paint(painter, selected, view_offset),
+            CanvasObject::Shape(shape) => shape.paint(painter, selected, view_offset),
         }
     }
 
@@ -984,38 +986,42 @@ impl CanvasObjectOps for CanvasStroke {
     }
 
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn paint(&self, painter: &egui::Painter, selected: bool) {
+    fn paint(&self, painter: &egui::Painter, selected: bool, view_offset: egui::Vec2) {
         let color = if selected { Color32::BLUE } else { self.color };
 
+        let offset_points: Vec<Pos2> = self.points.iter().map(|p| *p - view_offset).collect();
+
         painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-            self.points[0],
+            offset_points[0],
             self.width.first() / 2.0,
             color,
         )));
         if self.points.len() >= 2 {
             painter.add(egui::Shape::Circle(egui::epaint::CircleShape::filled(
-                self.points[self.points.len() - 1],
+                offset_points[offset_points.len() - 1],
                 self.width.last() / 2.0,
                 color,
             )));
             match &self.width {
                 StrokeWidth::Fixed(w) => {
                     if self.points.len() == 2 {
-                        painter
-                            .line_segment([self.points[0], self.points[1]], Stroke::new(*w, color));
+                        painter.line_segment(
+                            [offset_points[0], offset_points[1]],
+                            Stroke::new(*w, color),
+                        );
                     } else {
                         let path = egui::epaint::PathShape::line(
-                            self.points.clone(),
+                            offset_points.clone(),
                             Stroke::new(*w, color),
                         );
                         painter.add(egui::Shape::Path(path));
                     }
                 }
                 StrokeWidth::Dynamic(widths) => {
-                    for i in 0..self.points.len() - 1 {
+                    for i in 0..offset_points.len() - 1 {
                         let avg_width = (widths[i] + widths[i + 1]) / 2.0;
                         painter.line_segment(
-                            [self.points[i], self.points[i + 1]],
+                            [offset_points[i], offset_points[i + 1]],
                             Stroke::new(avg_width, color),
                         );
                     }
@@ -1024,7 +1030,7 @@ impl CanvasObjectOps for CanvasStroke {
         }
 
         if selected {
-            let stroke_rect = self.bounding_box();
+            let stroke_rect = self.bounding_box().translate(-view_offset);
             painter.rect_stroke(
                 stroke_rect,
                 0.0,
@@ -1093,6 +1099,9 @@ pub enum PointerInteraction {
     ShapeInsert {
         start_pos: Pos2,
         shape_type: CanvasShapeType,
+    },
+    Panning {
+        last_pos: Pos2,
     },
 }
 
@@ -1484,6 +1493,7 @@ pub struct AppState {
     pub brush_color: Color32,                 // 画笔颜色
     pub brush_width: f32,                     // 画笔大小
     pub dynamic_brush_width_mode: DynamicBrushWidthMode, // 动态画笔大小微调
+    pub view_offset: egui::Vec2,              // 画布视图偏移 (无限画布)
     pub current_tool: CanvasTool,             // 当前工具
     pub current_insert_tab: InsertTab,        // 插入工具的当前标签页
     pub selected_shape_type: Option<CanvasShapeType>, // 插入形状时选中的形状类型
@@ -1540,6 +1550,7 @@ impl Default for AppState {
             brush_color: Color32::WHITE,
             brush_width: 3.0,
             dynamic_brush_width_mode: DynamicBrushWidthMode::default(),
+            view_offset: egui::Vec2::ZERO,
             current_tool: CanvasTool::Brush,
             current_insert_tab: InsertTab::Shape,
             selected_shape_type: None,

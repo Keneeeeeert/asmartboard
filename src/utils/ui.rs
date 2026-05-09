@@ -89,6 +89,7 @@ pub fn clear_interaction_state(state: &mut AppState) {
     state.pointers.clear();
     state.shapes_inserted_count = 0;
     state.selected_shape_type = None;
+    state.view_offset = Default::default();
 }
 
 pub fn switch_to_page_state(state: &mut AppState, page_index: usize) {
