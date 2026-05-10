@@ -95,11 +95,19 @@ impl RenderState {
     pub fn resize_surface(&mut self, width: u32, height: u32) {
         self.surface_config.width = width;
         self.surface_config.height = height;
+        let _ = self.device.poll(wgpu::wgt::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(5)),
+        });
         self.surface.configure(&self.device, &self.surface_config);
     }
 
     pub fn set_present_mode(&mut self, present_mode: wgpu::PresentMode) {
         self.surface_config.present_mode = present_mode;
+        let _ = self.device.poll(wgpu::wgt::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(5)),
+        });
         self.surface.configure(&self.device, &self.surface_config);
     }
 }

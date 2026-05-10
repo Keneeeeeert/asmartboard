@@ -80,13 +80,11 @@ pub unsafe fn enable_premultiplied_alpha(hwnd: HWND) -> windows::core::Result<()
     unsafe { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex_style as isize) };
 
     unsafe {
-        let _ = SetLayeredWindowAttributes(
+        SetLayeredWindowAttributes(
             hwnd,
             COLORREF(0), // colorkey (unused)
             255,         // global alpha
             LWA_ALPHA,
-        );
-    };
-
-    Ok(())
+        )
+    }
 }

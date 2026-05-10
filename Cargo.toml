@@ -34,44 +34,44 @@ wgpu = { version = "29", default-features = false, features = [
 ] }
 
 # ui utils
-egui-notify = "*"
-image = { version = "*", default-features = false, features = [
+egui-notify = "0.22"
+image = { version = "0.25", default-features = false, features = [
     "ico",
     "jpeg",
     "png",
     "webp",
 ] }
-tray-icon = "*"
-ttf-parser = "*"
-rfd = "*"
+tray-icon = "0.24"
+ttf-parser = "0.25"
+rfd = "0.17"
 
 # serialization
-serde = { version = "*", features = ["derive"] }
-serde_json = "*"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 rkyv = { version = "0.8", features = ["alloc", "bytecheck"] }
 
 # utils
-pollster = "*"
-dirs = "*"
+pollster = "0.4"
+dirs = "6"
 
 # features dependencies
-rodio = { version = "*", default-features = false, features = [
+rodio = { version = "0.22", default-features = false, features = [
     "wav",
     "playback",
 ], optional = true }
-fontdb = { version = "*", optional = true }
-profiling = { version = "*", optional = true, features = [
+fontdb = { version = "0.23", optional = true }
+profiling = { version = "1", optional = true, features = [
     "profile-with-puffin",
 ] }
-puffin = { version = "*", optional = true }
-puffin_egui = { version = "*", optional = true }
+puffin = { version = "0.20", optional = true }
+puffin_egui = { version = "0.30", optional = true }
 
 [patch.crates-io]
 puffin = { git = "https://github.com/EmbarkStudios/puffin" }      # crates.io version uses out-of-date egui
 puffin_egui = { git = "https://github.com/EmbarkStudios/puffin" } # crates.io version uses out-of-date egui
 
 [build-dependencies]
-winres = "*"
+winres = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 glib = { version = "0.22", default-features = false }
@@ -82,15 +82,15 @@ winit = { version = "0.30", default-features = false, features = ["wayland"] }
 egui-wgpu = { version = "0.34", features = ["wayland"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "*", features = [
+windows = { version = "0.62", features = [
     "Win32_System_Console",
     "Win32_System_Com",
     "Win32_Foundation",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
-windows-core = { version = "*", default-features = false }
-winreg = "*"
+windows-core = { version = "0.62", default-features = false }
+winreg = "0.56"
 
 [profile.release]
 strip = true

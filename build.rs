@@ -12,14 +12,16 @@ fn main() {
 
         println!("cargo:rerun-if-changed={}", frames_dir.display());
 
-        let mut entries: Vec<_> = fs::read_dir(&frames_dir)
-            .unwrap_or_else(|e| {
-                panic!(
-                    "failed to read frames directory: {}\npath: {}",
-                    e,
-                    frames_dir.display()
-                )
-            })
+        let mut entries: Vec<_> = match fs::read_dir(&frames_dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                println!("cargo:warning=failed to read frames directory: {e}, path: {}", frames_dir.display());
+                println!("cargo:warning=startup animation frames not found, animation will be disabled");
+                let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+                fs::write(out_dir.join("startup_frames.rs"), "pub const STARTUP_FRAMES: &[&[u8]] = &[];\n").unwrap();
+                return;
+            }
+        }
             .map(|e| e.unwrap().path())
             .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("png"))
             .collect();

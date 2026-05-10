@@ -69,7 +69,15 @@ pub fn font_bytes() -> &'static [u8] {
                 }
             }
 
-            panic!("cannot find cjk font")
+            eprintln!("warning: cannot find CJK font, using embedded fallback");
+            #[cfg(feature = "embedded_font")]
+            {
+                EMBEDDED_FONT.to_vec()
+            }
+            #[cfg(not(feature = "embedded_font"))]
+            {
+                Vec::new()
+            }
         }
     })
 }

@@ -31,7 +31,7 @@ use crate::utils;
 /// Must be kept in sync with [`CANVAS_FILE_HEADER`].
 const CANVAS_FILE_MAGIC: &[u8; 3] = b"UWU";
 const CANVAS_FILE_VERSION: u8 = 2;
-const CANVAS_FILE_EXT: &str = "owo"; // open whiteboard objects
+const CANVAS_FILE_EXT: &str = "sb"; // smartboard binary
 
 fn make_canvas_file_header() -> [u8; 4] {
     let mut h = [0u8; 4];

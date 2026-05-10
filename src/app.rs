@@ -196,14 +196,20 @@ error: failed to enable premultiplied alpha for window: {:?}
         if let Err(err) = self.state.persistent.save_to_file() {
             eprintln!("failed to save settings: {}", err);
         }
+        if let Some(render_state) = self.render_state.take() {
+            let _ = render_state.device.poll(wgpu::wgt::PollType::Wait {
+                submission_index: None,
+                timeout: Some(std::time::Duration::from_secs(5)),
+            });
+            drop(render_state);
+        }
         event_loop.exit();
     }
 
     fn handle_resized(&mut self, width: u32, height: u32) {
-        self.render_state
-            .as_mut()
-            .unwrap()
-            .resize_surface(width, height);
+        if let Some(render_state) = self.render_state.as_mut() {
+            render_state.resize_surface(width, height);
+        }
     }
 
     #[cfg_attr(feature = "profiling", profiling::function)]
@@ -363,13 +369,21 @@ error: failed to enable premultiplied alpha for window: {:?}
 
             let buffer_slice = output_buffer.slice(..);
 
-            buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
 
-            // ensure gpu work is done
             let _ = render_state.device.poll(wgpu::wgt::PollType::Wait {
                 submission_index: None,
-                timeout: None,
+                timeout: Some(std::time::Duration::from_secs(5)),
             });
+
+            if receiver.recv().is_err() {
+                self.state.screenshot_path = None;
+                self.state.toasts.error("截图失败：缓冲区映射超时!");
+                return;
+            }
 
             let data = buffer_slice.get_mapped_range();
 
